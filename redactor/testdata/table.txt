@@ -1,0 +1,3 @@
+NAMESPACE   APIVERSION   KIND   NAME            READY   STATUS             RESTARTS   AGE
+shop        v1           Pod    checkout-7d9f   0/1     CrashLoopBackOff   5          12m
+shop        v1           Pod    cart-55b8       1/1     Running            0          3d

@@ -1,0 +1,4 @@
+{
+  "$comment": "Vulnerabilities exempted from the redactor image scan gate (scripts/ci/image-scan-gate.sh). One id + package per entry, each with a tracking issue number in this repository and a concrete reason; remove once fixed.",
+  "allow": []
+}

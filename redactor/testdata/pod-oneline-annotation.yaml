@@ -1,0 +1,5 @@
+metadata:
+  annotations:
+    "kubectl.kubernetes.io/last-applied-configuration": '{"spec":{"containers":[{"env":[{"name":"K","value":"leak"}]}]}}'
+    team: payments
+  name: api

@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    prometheus.io/scrape: "true"
+  labels:
+    app: checkout
+  name: checkout-7d9f
+  namespace: shop
+spec:
+  containers:
+  - args: "<redacted>"
+    command: "<redacted>"
+    env:
+    - name: DB_PASSWORD
+      value: "<redacted>"
+    - name: MULTILINE
+      value: "<redacted>"
+    - name: FROM_SECRET
+      valueFrom:
+        secretKeyRef:
+          key: password
+          name: db-creds
+    - name: QUOTED
+      value: "<redacted>"
+    image: shop/checkout:1.4.2
+    livenessProbe:
+      httpGet:
+        httpHeaders:
+        - name: Authorization
+          value: "<redacted>"
+        path: /healthz
+        port: 8080
+    name: checkout
+    volumeMounts:
+    - mountPath: /etc/creds
+      name: creds
+  - name: sidecar
+    image: envoy:1.30
+    command: "<redacted>"
+    env: "<redacted>"
+  volumes:
+  - name: creds
+    secret: "<redacted>"
+  serviceAccountToken: placeholder
+  token: "<redacted>"
+  Password: "<redacted>"
+status:
+  phase: Running

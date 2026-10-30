@@ -1,0 +1,25 @@
+2026-10-26T10:00:00Z INFO starting checkout-service v1.4.2 on :8080
+2026-10-26T10:00:01Z DEBUG outbound request headers: Authorization: Bearer {{BEARER}}
+2026-10-26T10:00:01Z DEBUG proxy auth: Authorization: Basic {{BASIC}}
+2026-10-26T10:00:02Z INFO exporter token {{DT_FULL}} loaded
+2026-10-26T10:00:02Z INFO fallback key {{DT_SHORT}}
+2026-10-26T10:00:03Z DEBUG id_token={{JWT}}
+2026-10-26T10:00:03Z INFO aws client AccessKeyId={{AKID}} region=eu-west-1
+AWS_SECRET_ACCESS_KEY={{AWS_SECRET}}
+2026-10-26T10:00:04Z WARN git clone with {{GHP}} failed
+2026-10-26T10:00:04Z WARN slack notify via {{SLACK}} returned 403
+-----BEGIN RSA PRIVATE KEY-----
+{{PEM_BODY}}
+-----END RSA PRIVATE KEY-----
+2026-10-26T10:00:05Z INFO config loaded: {"db_password": "{{JSON_PW}}", "api_key":"{{JSON_KEY}}", "pool": 10}
+DB_PASSWORD={{ENV_PW}}
+2026-10-26T10:00:05Z DEBUG level=debug client_secret={{LOGFMT_SECRET}} retries=3
+2026-10-26T10:00:05Z DEBUG yaml-ish credentials: {{YAML_CRED}}
+2026-10-26T10:00:06Z INFO connecting to postgres://checkout:{{CONN_PW}}@db.prod.svc:5432/orders?sslmode=require
+2026-10-26T10:00:06Z INFO started worker --password={{CLI_PW}}
+2026-10-26T10:00:07Z INFO tokenizer loaded 32000 tokens from vocab.json
+2026-10-26T10:00:07Z INFO the secretariat approved request 42; passwordless login enabled
+2026-10-26T10:00:07Z INFO password reset requested for user alice; token expired, issuing a new one
+2026-10-26T10:00:08Z INFO fetched https://api.example.com/v1/orders?page=2 in 120ms
+2026-10-26T10:00:08Z INFO bearer auth configured; basic metrics enabled
+2026-10-26T10:00:09Z ERROR OOMKilled: container memhog exceeded 100Mi limit
