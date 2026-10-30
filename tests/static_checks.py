@@ -6,7 +6,7 @@ AC "with pod logs off, the namespace stays PSA restricted": every render
 without pod-logs must need only `restricted`. Also: no hostPort anywhere, no
 nodes/proxy, no Secret/ConfigMap RBAC, images pinned by digest, the semconv v1
 gates on every collector, one leader elector on all cluster receivers, the app
-intake Service local to the node. The kind e2e re-checks PSA with real admission.
+intake Service local to the node, no Service without ports. The kind e2e re-checks PSA with real admission.
 
 A zero placeholder digest is a NOTE, or a failure with REQUIRE_PINNED_DIGESTS=1
 (`make pinned`, used by the release workflow).
@@ -55,6 +55,11 @@ for f in sorted(glob.glob(os.path.join(sys.argv[1], "*.yaml"))):
                     fail(f, f"placeholder digest: {img}")
                 else:
                     notes.append(f"placeholder digest (pin TODO): {img}")
+
+    # The API server rejects a Service with no ports; helm template does not.
+    for d in docs:
+        if d and d.get("kind") == "Service" and not (d.get("spec") or {}).get("ports"):
+            fail(f, f"Service {d['metadata']['name']} has no spec.ports (API server rejects it)")
 
     # hostPort / host namespaces anywhere
     for owner, spec in sp.pod_specs(docs):

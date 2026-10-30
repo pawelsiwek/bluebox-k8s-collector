@@ -7,6 +7,12 @@
 mode: deployment
 fullnameOverride: bluebox-otelcol-cluster
 
+# The cluster release receives nothing over the network (every port is off in
+# common.yaml), so it gets no Service: the chart would render one with an empty
+# spec.ports, which the API server rejects.
+service:
+  enabled: false
+
 # The three components only the Bluebox image has are defined here, as extra
 # inline config sources, not under `config:`. Helm cannot delete a key another
 # values file added, so overlays/dynatrace-image/cluster.yaml drops them by
