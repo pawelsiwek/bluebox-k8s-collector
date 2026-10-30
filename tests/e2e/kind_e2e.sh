@@ -157,9 +157,12 @@ echo "ok: redaction in a live cluster"
 
 # --- v1 attribute names only ---
 # The k8sattributes v0 -> v1 renames that apply to this config:
-# container.image.tag -> container.image.tags (agent extracts it).
-if grep -qF '"key": "container.image.tag"' "$work/sink.jsonl"; then fail "v0 attribute container.image.tag present"; fi
-grep -qF '"key": "container.image.tags"' "$work/sink.jsonl" || fail "v1 attribute container.image.tags missing"
+# container.image.tag -> container.image.tags (agent extracts it). The
+# k8s_cluster receiver emits its own container.image.tag; the gates do not
+# cover it, so the check reads agent records only.
+agent_keys() { jq -r '(.body.resourceMetrics[]?, .body.resourceLogs[]?) | select(any(.resource.attributes[]?; .key == "bluebox.collector.role" and .value.stringValue == "agent")) | .resource.attributes[]?.key' "$work/sink.jsonl"; }
+if agent_keys | grep -qx container.image.tag; then fail "v0 attribute container.image.tag on agent records"; fi
+agent_keys | grep -qx container.image.tags || fail "v1 attribute container.image.tags missing on agent records"
 jq -s -e '[.[] | select(.path | endswith("/v1/metrics")) | .body.resourceMetrics[]?.resource.attributes[]?.key] | index("k8s.cluster.uid")' "$work/sink.jsonl" >/dev/null || fail "k8s.cluster.uid missing on metrics"
 echo "ok: v1 attribute names"
 
