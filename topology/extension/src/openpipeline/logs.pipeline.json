@@ -1,0 +1,950 @@
+{
+  "customId": "k8s-otel-logs",
+  "displayName": "K8s OTel Logs: Topology + Events",
+  "metadataList": [],
+  "processing": {
+    "processors": [
+      {
+        "type": "fieldsAdd",
+        "id": "add-replicaset-id-input",
+        "enabled": true,
+        "description": "Built-in K8S_REPLICASET IDs hash the literal kind \"replicaset\"; pod/container records of deployment-owned pods carry kind=deployment, so supply it for the owner-ReplicaSet ID lookup. Stays on the stored record: the storage stage cannot remove fields.",
+        "matcher": "isNotNull(k8s.replicaset.name) and k8s.workload.kind != \"replicaset\"",
+        "fieldsAdd": {
+          "fields": [
+            {
+              "name": "k8s_otel.replicaset_kind",
+              "value": "replicaset",
+              "valueType": "string"
+            }
+          ]
+        }
+      },
+      {
+        "type": "fieldsAdd",
+        "id": "add-deployment-id-input",
+        "enabled": true,
+        "description": "Built-in K8S_DEPLOYMENT IDs hash the literal kind \"deployment\"; ReplicaSet records carry kind=replicaset, so supply it for the owner-Deployment ID lookup. Stays on the stored record: the storage stage cannot remove fields.",
+        "matcher": "isNotNull(k8s.deployment.name) and k8s.workload.kind != \"deployment\"",
+        "fieldsAdd": {
+          "fields": [
+            {
+              "name": "k8s_otel.deployment_kind",
+              "value": "deployment",
+              "valueType": "string"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "smartscapeNodeExtraction": {
+    "processors": [
+      {
+        "type": "smartscapeNode",
+        "id": "extract-k8s-cluster",
+        "enabled": true,
+        "description": "Extract K8S_CLUSTER from KUBERNETES_OTEL_TOPO events",
+        "matcher": "isNotNull(k8s.cluster.uid)",
+        "smartscapeNode": {
+          "nodeType": "K8S_CLUSTER",
+          "nodeIdFieldName": "dt.smartscape.k8s_cluster",
+          "extractNode": true,
+          "idComponents": [
+            {
+              "idComponent": "k8s.cluster.uid",
+              "referencedFieldName": "k8s.cluster.uid"
+            }
+          ],
+          "nodeName": {
+            "type": "field",
+            "field": {
+              "sourceFieldName": "k8s.cluster.name"
+            }
+          },
+          "fieldsToExtract": [
+            {
+              "fieldName": "k8s.cluster.name",
+              "referencedFieldName": "k8s.cluster.name",
+              "strategy": "equals"
+            }
+          ],
+          "staticEdgesToExtract": []
+        }
+      },
+      {
+        "type": "smartscapeNode",
+        "id": "extract-k8s-namespace",
+        "enabled": true,
+        "description": "Extract K8S_NAMESPACE from KUBERNETES_OTEL_TOPO events",
+        "matcher": "isNotNull(k8s.cluster.uid) and isNotNull(k8s.namespace.name)",
+        "smartscapeNode": {
+          "nodeType": "K8S_NAMESPACE",
+          "nodeIdFieldName": "dt.smartscape.k8s_namespace",
+          "extractNode": true,
+          "idComponents": [
+            {
+              "idComponent": "k8s.cluster.uid",
+              "referencedFieldName": "k8s.cluster.uid"
+            },
+            {
+              "idComponent": "k8s.namespace.name",
+              "referencedFieldName": "k8s.namespace.name"
+            }
+          ],
+          "nodeName": {
+            "type": "field",
+            "field": {
+              "sourceFieldName": "k8s.namespace.name"
+            }
+          },
+          "fieldsToExtract": [
+            {
+              "fieldName": "k8s.cluster.name",
+              "referencedFieldName": "k8s.cluster.name",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.cluster.uid",
+              "referencedFieldName": "k8s.cluster.uid",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.namespace.name",
+              "referencedFieldName": "k8s.namespace.name"
+            },
+            {
+              "fieldName": "k8s.namespace.uid",
+              "referencedFieldName": "k8s.namespace.uid"
+            },
+            {
+              "fieldName": "k8s.object",
+              "referencedFieldName": "k8s.object"
+            }
+          ],
+          "staticEdgesToExtract": [
+            {
+              "edgeType": "belongs_to",
+              "targetType": "K8S_CLUSTER",
+              "targetIdFieldName": "dt.smartscape.k8s_cluster"
+            }
+          ]
+        }
+      },
+      {
+        "type": "smartscapeNode",
+        "id": "extract-k8s-node",
+        "enabled": true,
+        "description": "Extract K8S_NODE from KUBERNETES_OTEL_TOPO events",
+        "matcher": "isNotNull(k8s.cluster.uid) and isNotNull(k8s.node.name)",
+        "smartscapeNode": {
+          "nodeType": "K8S_NODE",
+          "nodeIdFieldName": "dt.smartscape.k8s_node",
+          "extractNode": true,
+          "idComponents": [
+            {
+              "idComponent": "k8s.cluster.uid",
+              "referencedFieldName": "k8s.cluster.uid"
+            },
+            {
+              "idComponent": "k8s.node.name",
+              "referencedFieldName": "k8s.node.name"
+            }
+          ],
+          "nodeName": {
+            "type": "field",
+            "field": {
+              "sourceFieldName": "k8s.node.name"
+            }
+          },
+          "fieldsToExtract": [
+            {
+              "fieldName": "k8s.cluster.name",
+              "referencedFieldName": "k8s.cluster.name",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.cluster.uid",
+              "referencedFieldName": "k8s.cluster.uid",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.node.system_uuid",
+              "referencedFieldName": "k8s.node.system_uuid",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.node.name",
+              "referencedFieldName": "k8s.node.name"
+            },
+            {
+              "fieldName": "k8s.node.uid",
+              "referencedFieldName": "k8s.node.uid"
+            },
+            {
+              "fieldName": "k8s.object",
+              "referencedFieldName": "k8s.object"
+            }
+          ],
+          "staticEdgesToExtract": [
+            {
+              "edgeType": "belongs_to",
+              "targetType": "K8S_CLUSTER",
+              "targetIdFieldName": "dt.smartscape.k8s_cluster"
+            }
+          ]
+        }
+      },
+      {
+        "type": "smartscapeNode",
+        "id": "extract-k8s-deployment",
+        "enabled": true,
+        "description": "Extract K8S_DEPLOYMENT from KUBERNETES_OTEL_TOPO events",
+        "matcher": "isNotNull(k8s.cluster.uid) and isNotNull(k8s.namespace.name) and k8s.workload.kind == \"deployment\" and isNotNull(k8s.workload.name)",
+        "smartscapeNode": {
+          "nodeType": "K8S_DEPLOYMENT",
+          "nodeIdFieldName": "dt.smartscape.k8s_deployment",
+          "extractNode": true,
+          "idComponents": [
+            {
+              "idComponent": "k8s.cluster.uid",
+              "referencedFieldName": "k8s.cluster.uid"
+            },
+            {
+              "idComponent": "k8s.namespace.name",
+              "referencedFieldName": "k8s.namespace.name"
+            },
+            {
+              "idComponent": "k8s.workload.kind",
+              "referencedFieldName": "k8s.workload.kind"
+            },
+            {
+              "idComponent": "k8s.workload.name",
+              "referencedFieldName": "k8s.workload.name"
+            }
+          ],
+          "nodeName": {
+            "type": "field",
+            "field": {
+              "sourceFieldName": "k8s.deployment.name"
+            }
+          },
+          "fieldsToExtract": [
+            {
+              "fieldName": "k8s.cluster.name",
+              "referencedFieldName": "k8s.cluster.name",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.namespace.name",
+              "referencedFieldName": "k8s.namespace.name",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.cluster.uid",
+              "referencedFieldName": "k8s.cluster.uid"
+            },
+            {
+              "fieldName": "k8s.deployment.name",
+              "referencedFieldName": "k8s.deployment.name"
+            },
+            {
+              "fieldName": "k8s.object",
+              "referencedFieldName": "k8s.object"
+            },
+            {
+              "fieldName": "k8s.workload.kind",
+              "referencedFieldName": "k8s.workload.kind"
+            },
+            {
+              "fieldName": "k8s.workload.name",
+              "referencedFieldName": "k8s.workload.name"
+            }
+          ],
+          "staticEdgesToExtract": [
+            {
+              "edgeType": "belongs_to",
+              "targetType": "K8S_CLUSTER",
+              "targetIdFieldName": "dt.smartscape.k8s_cluster"
+            },
+            {
+              "edgeType": "belongs_to",
+              "targetType": "K8S_NAMESPACE",
+              "targetIdFieldName": "dt.smartscape.k8s_namespace"
+            }
+          ]
+        }
+      },
+      {
+        "type": "smartscapeNode",
+        "id": "enrich-k8s-deployment-owner",
+        "enabled": true,
+        "description": "Compute the owning K8S_DEPLOYMENT ID on ReplicaSet records so their is_part_of edge resolves (no node extraction)",
+        "matcher": "isNotNull(k8s.cluster.uid) and isNotNull(k8s.namespace.name) and isNotNull(k8s_otel.deployment_kind) and isNotNull(k8s.deployment.name)",
+        "smartscapeNode": {
+          "nodeType": "K8S_DEPLOYMENT",
+          "nodeIdFieldName": "dt.smartscape.k8s_deployment",
+          "extractNode": false,
+          "idComponents": [
+            {
+              "idComponent": "k8s.cluster.uid",
+              "referencedFieldName": "k8s.cluster.uid"
+            },
+            {
+              "idComponent": "k8s.namespace.name",
+              "referencedFieldName": "k8s.namespace.name"
+            },
+            {
+              "idComponent": "k8s.workload.kind",
+              "referencedFieldName": "k8s_otel.deployment_kind"
+            },
+            {
+              "idComponent": "k8s.workload.name",
+              "referencedFieldName": "k8s.deployment.name"
+            }
+          ],
+          "fieldsToExtract": [],
+          "staticEdgesToExtract": []
+        }
+      },
+      {
+        "type": "smartscapeNode",
+        "id": "extract-k8s-statefulset",
+        "enabled": true,
+        "description": "Extract K8S_STATEFULSET from KUBERNETES_OTEL_TOPO events",
+        "matcher": "isNotNull(k8s.cluster.uid) and isNotNull(k8s.namespace.name) and k8s.workload.kind == \"statefulset\" and isNotNull(k8s.workload.name)",
+        "smartscapeNode": {
+          "nodeType": "K8S_STATEFULSET",
+          "nodeIdFieldName": "dt.smartscape.k8s_statefulset",
+          "extractNode": true,
+          "idComponents": [
+            {
+              "idComponent": "k8s.cluster.uid",
+              "referencedFieldName": "k8s.cluster.uid"
+            },
+            {
+              "idComponent": "k8s.namespace.name",
+              "referencedFieldName": "k8s.namespace.name"
+            },
+            {
+              "idComponent": "k8s.workload.kind",
+              "referencedFieldName": "k8s.workload.kind"
+            },
+            {
+              "idComponent": "k8s.workload.name",
+              "referencedFieldName": "k8s.workload.name"
+            }
+          ],
+          "nodeName": {
+            "type": "field",
+            "field": {
+              "sourceFieldName": "k8s.statefulset.name"
+            }
+          },
+          "fieldsToExtract": [
+            {
+              "fieldName": "k8s.cluster.name",
+              "referencedFieldName": "k8s.cluster.name",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.namespace.name",
+              "referencedFieldName": "k8s.namespace.name",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.cluster.uid",
+              "referencedFieldName": "k8s.cluster.uid"
+            },
+            {
+              "fieldName": "k8s.object",
+              "referencedFieldName": "k8s.object"
+            },
+            {
+              "fieldName": "k8s.statefulset.name",
+              "referencedFieldName": "k8s.statefulset.name"
+            },
+            {
+              "fieldName": "k8s.workload.kind",
+              "referencedFieldName": "k8s.workload.kind"
+            },
+            {
+              "fieldName": "k8s.workload.name",
+              "referencedFieldName": "k8s.workload.name"
+            }
+          ],
+          "staticEdgesToExtract": [
+            {
+              "edgeType": "belongs_to",
+              "targetType": "K8S_CLUSTER",
+              "targetIdFieldName": "dt.smartscape.k8s_cluster"
+            },
+            {
+              "edgeType": "belongs_to",
+              "targetType": "K8S_NAMESPACE",
+              "targetIdFieldName": "dt.smartscape.k8s_namespace"
+            }
+          ]
+        }
+      },
+      {
+        "type": "smartscapeNode",
+        "id": "extract-k8s-daemonset",
+        "enabled": true,
+        "description": "Extract K8S_DAEMONSET from KUBERNETES_OTEL_TOPO events",
+        "matcher": "isNotNull(k8s.cluster.uid) and isNotNull(k8s.namespace.name) and k8s.workload.kind == \"daemonset\" and isNotNull(k8s.workload.name)",
+        "smartscapeNode": {
+          "nodeType": "K8S_DAEMONSET",
+          "nodeIdFieldName": "dt.smartscape.k8s_daemonset",
+          "extractNode": true,
+          "idComponents": [
+            {
+              "idComponent": "k8s.cluster.uid",
+              "referencedFieldName": "k8s.cluster.uid"
+            },
+            {
+              "idComponent": "k8s.namespace.name",
+              "referencedFieldName": "k8s.namespace.name"
+            },
+            {
+              "idComponent": "k8s.workload.kind",
+              "referencedFieldName": "k8s.workload.kind"
+            },
+            {
+              "idComponent": "k8s.workload.name",
+              "referencedFieldName": "k8s.workload.name"
+            }
+          ],
+          "nodeName": {
+            "type": "field",
+            "field": {
+              "sourceFieldName": "k8s.daemonset.name"
+            }
+          },
+          "fieldsToExtract": [
+            {
+              "fieldName": "k8s.cluster.name",
+              "referencedFieldName": "k8s.cluster.name",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.namespace.name",
+              "referencedFieldName": "k8s.namespace.name",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.cluster.uid",
+              "referencedFieldName": "k8s.cluster.uid"
+            },
+            {
+              "fieldName": "k8s.daemonset.name",
+              "referencedFieldName": "k8s.daemonset.name"
+            },
+            {
+              "fieldName": "k8s.object",
+              "referencedFieldName": "k8s.object"
+            },
+            {
+              "fieldName": "k8s.workload.kind",
+              "referencedFieldName": "k8s.workload.kind"
+            },
+            {
+              "fieldName": "k8s.workload.name",
+              "referencedFieldName": "k8s.workload.name"
+            }
+          ],
+          "staticEdgesToExtract": [
+            {
+              "edgeType": "belongs_to",
+              "targetType": "K8S_CLUSTER",
+              "targetIdFieldName": "dt.smartscape.k8s_cluster"
+            },
+            {
+              "edgeType": "belongs_to",
+              "targetType": "K8S_NAMESPACE",
+              "targetIdFieldName": "dt.smartscape.k8s_namespace"
+            }
+          ]
+        }
+      },
+      {
+        "type": "smartscapeNode",
+        "id": "extract-k8s-replicaset",
+        "enabled": true,
+        "description": "Extract K8S_REPLICASET from KUBERNETES_OTEL_TOPO events",
+        "matcher": "isNotNull(k8s.cluster.uid) and isNotNull(k8s.namespace.name) and k8s.workload.kind == \"replicaset\" and isNotNull(k8s.workload.name)",
+        "smartscapeNode": {
+          "nodeType": "K8S_REPLICASET",
+          "nodeIdFieldName": "dt.smartscape.k8s_replicaset",
+          "extractNode": true,
+          "idComponents": [
+            {
+              "idComponent": "k8s.cluster.uid",
+              "referencedFieldName": "k8s.cluster.uid"
+            },
+            {
+              "idComponent": "k8s.namespace.name",
+              "referencedFieldName": "k8s.namespace.name"
+            },
+            {
+              "idComponent": "k8s.workload.kind",
+              "referencedFieldName": "k8s.workload.kind"
+            },
+            {
+              "idComponent": "k8s.workload.name",
+              "referencedFieldName": "k8s.workload.name"
+            }
+          ],
+          "nodeName": {
+            "type": "field",
+            "field": {
+              "sourceFieldName": "k8s.replicaset.name"
+            }
+          },
+          "fieldsToExtract": [
+            {
+              "fieldName": "k8s.cluster.name",
+              "referencedFieldName": "k8s.cluster.name",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.namespace.name",
+              "referencedFieldName": "k8s.namespace.name",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.cluster.uid",
+              "referencedFieldName": "k8s.cluster.uid"
+            },
+            {
+              "fieldName": "k8s.object",
+              "referencedFieldName": "k8s.object"
+            },
+            {
+              "fieldName": "k8s.replicaset.name",
+              "referencedFieldName": "k8s.replicaset.name"
+            },
+            {
+              "fieldName": "k8s.workload.kind",
+              "referencedFieldName": "k8s.workload.kind"
+            },
+            {
+              "fieldName": "k8s.workload.name",
+              "referencedFieldName": "k8s.workload.name"
+            }
+          ],
+          "staticEdgesToExtract": [
+            {
+              "edgeType": "belongs_to",
+              "targetType": "K8S_CLUSTER",
+              "targetIdFieldName": "dt.smartscape.k8s_cluster"
+            },
+            {
+              "edgeType": "belongs_to",
+              "targetType": "K8S_NAMESPACE",
+              "targetIdFieldName": "dt.smartscape.k8s_namespace"
+            },
+            {
+              "edgeType": "is_part_of",
+              "targetType": "K8S_DEPLOYMENT",
+              "targetIdFieldName": "dt.smartscape.k8s_deployment"
+            }
+          ]
+        }
+      },
+      {
+        "type": "smartscapeNode",
+        "id": "enrich-k8s-replicaset-owner",
+        "enabled": true,
+        "description": "Compute the owning K8S_REPLICASET ID on pod/container records so their is_part_of edges resolve (no node extraction)",
+        "matcher": "isNotNull(k8s.cluster.uid) and isNotNull(k8s.namespace.name) and isNotNull(k8s_otel.replicaset_kind) and isNotNull(k8s.replicaset.name)",
+        "smartscapeNode": {
+          "nodeType": "K8S_REPLICASET",
+          "nodeIdFieldName": "dt.smartscape.k8s_replicaset",
+          "extractNode": false,
+          "idComponents": [
+            {
+              "idComponent": "k8s.cluster.uid",
+              "referencedFieldName": "k8s.cluster.uid"
+            },
+            {
+              "idComponent": "k8s.namespace.name",
+              "referencedFieldName": "k8s.namespace.name"
+            },
+            {
+              "idComponent": "k8s.workload.kind",
+              "referencedFieldName": "k8s_otel.replicaset_kind"
+            },
+            {
+              "idComponent": "k8s.workload.name",
+              "referencedFieldName": "k8s.replicaset.name"
+            }
+          ],
+          "fieldsToExtract": [],
+          "staticEdgesToExtract": []
+        }
+      },
+      {
+        "type": "smartscapeNode",
+        "id": "extract-k8s-pod",
+        "enabled": true,
+        "description": "Extract K8S_POD from KUBERNETES_OTEL_TOPO events",
+        "matcher": "isNotNull(k8s.cluster.uid) and isNotNull(k8s.pod.uid)",
+        "smartscapeNode": {
+          "nodeType": "K8S_POD",
+          "nodeIdFieldName": "dt.smartscape.k8s_pod",
+          "extractNode": true,
+          "idComponents": [
+            {
+              "idComponent": "k8s.cluster.uid",
+              "referencedFieldName": "k8s.cluster.uid"
+            },
+            {
+              "idComponent": "k8s.pod.uid",
+              "referencedFieldName": "k8s.pod.uid"
+            }
+          ],
+          "nodeName": {
+            "type": "field",
+            "field": {
+              "sourceFieldName": "k8s.pod.name"
+            }
+          },
+          "fieldsToExtract": [
+            {
+              "fieldName": "k8s.cluster.name",
+              "referencedFieldName": "k8s.cluster.name",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.namespace.name",
+              "referencedFieldName": "k8s.namespace.name",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.node.name",
+              "referencedFieldName": "k8s.node.name",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.pod.phase",
+              "referencedFieldName": "k8s.pod.phase",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.workload.name",
+              "referencedFieldName": "k8s.workload.name",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.workload.kind",
+              "referencedFieldName": "k8s.workload.kind",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.object",
+              "referencedFieldName": "k8s.object",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.cluster.uid",
+              "referencedFieldName": "k8s.cluster.uid"
+            },
+            {
+              "fieldName": "k8s.daemonset.name",
+              "referencedFieldName": "k8s.daemonset.name"
+            },
+            {
+              "fieldName": "k8s.pod.name",
+              "referencedFieldName": "k8s.pod.name"
+            },
+            {
+              "fieldName": "k8s.pod.uid",
+              "referencedFieldName": "k8s.pod.uid"
+            }
+          ],
+          "staticEdgesToExtract": [
+            {
+              "edgeType": "belongs_to",
+              "targetType": "K8S_CLUSTER",
+              "targetIdFieldName": "dt.smartscape.k8s_cluster"
+            },
+            {
+              "edgeType": "belongs_to",
+              "targetType": "K8S_NAMESPACE",
+              "targetIdFieldName": "dt.smartscape.k8s_namespace"
+            },
+            {
+              "edgeType": "runs_on",
+              "targetType": "K8S_NODE",
+              "targetIdFieldName": "dt.smartscape.k8s_node"
+            },
+            {
+              "edgeType": "is_part_of",
+              "targetType": "K8S_DEPLOYMENT",
+              "targetIdFieldName": "dt.smartscape.k8s_deployment"
+            },
+            {
+              "edgeType": "is_part_of",
+              "targetType": "K8S_STATEFULSET",
+              "targetIdFieldName": "dt.smartscape.k8s_statefulset"
+            },
+            {
+              "edgeType": "is_part_of",
+              "targetType": "K8S_DAEMONSET",
+              "targetIdFieldName": "dt.smartscape.k8s_daemonset"
+            },
+            {
+              "edgeType": "is_part_of",
+              "targetType": "K8S_REPLICASET",
+              "targetIdFieldName": "dt.smartscape.k8s_replicaset"
+            }
+          ]
+        }
+      },
+      {
+        "type": "smartscapeNode",
+        "id": "extract-container",
+        "enabled": true,
+        "description": "Extract CONTAINER from KUBERNETES_OTEL_TOPO events",
+        "matcher": "isNotNull(k8s.cluster.uid) and isNotNull(k8s.pod.uid) and isNotNull(k8s.container.name)",
+        "smartscapeNode": {
+          "nodeType": "CONTAINER",
+          "nodeIdFieldName": "dt.smartscape.container",
+          "extractNode": true,
+          "idComponents": [
+            {
+              "idComponent": "k8s.cluster.uid",
+              "referencedFieldName": "k8s.cluster.uid"
+            },
+            {
+              "idComponent": "k8s.pod.uid",
+              "referencedFieldName": "k8s.pod.uid"
+            },
+            {
+              "idComponent": "k8s.container.name",
+              "referencedFieldName": "k8s.container.name"
+            }
+          ],
+          "nodeName": {
+            "type": "field",
+            "field": {
+              "sourceFieldName": "k8s.container.name"
+            }
+          },
+          "fieldsToExtract": [
+            {
+              "fieldName": "k8s.cluster.name",
+              "referencedFieldName": "k8s.cluster.name",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.namespace.name",
+              "referencedFieldName": "k8s.namespace.name",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.pod.name",
+              "referencedFieldName": "k8s.pod.name",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.node.name",
+              "referencedFieldName": "k8s.node.name",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.container.name",
+              "referencedFieldName": "k8s.container.name",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.container.image",
+              "referencedFieldName": "k8s.container.image",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.workload.name",
+              "referencedFieldName": "k8s.workload.name",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.workload.kind",
+              "referencedFieldName": "k8s.workload.kind",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.cluster.uid",
+              "referencedFieldName": "k8s.cluster.uid",
+              "strategy": "equals"
+            }
+          ],
+          "staticEdgesToExtract": [
+            {
+              "edgeType": "is_part_of",
+              "targetType": "K8S_POD",
+              "targetIdFieldName": "dt.smartscape.k8s_pod"
+            },
+            {
+              "edgeType": "belongs_to",
+              "targetType": "K8S_CLUSTER",
+              "targetIdFieldName": "dt.smartscape.k8s_cluster"
+            },
+            {
+              "edgeType": "belongs_to",
+              "targetType": "K8S_NAMESPACE",
+              "targetIdFieldName": "dt.smartscape.k8s_namespace"
+            },
+            {
+              "edgeType": "runs_on",
+              "targetType": "K8S_NODE",
+              "targetIdFieldName": "dt.smartscape.k8s_node"
+            },
+            {
+              "edgeType": "is_part_of",
+              "targetType": "K8S_DEPLOYMENT",
+              "targetIdFieldName": "dt.smartscape.k8s_deployment"
+            },
+            {
+              "edgeType": "is_part_of",
+              "targetType": "K8S_STATEFULSET",
+              "targetIdFieldName": "dt.smartscape.k8s_statefulset"
+            },
+            {
+              "edgeType": "is_part_of",
+              "targetType": "K8S_DAEMONSET",
+              "targetIdFieldName": "dt.smartscape.k8s_daemonset"
+            },
+            {
+              "edgeType": "is_part_of",
+              "targetType": "K8S_REPLICASET",
+              "targetIdFieldName": "dt.smartscape.k8s_replicaset"
+            }
+          ]
+        }
+      },
+      {
+        "type": "smartscapeNode",
+        "id": "extract-k8s-service",
+        "enabled": true,
+        "description": "Extract K8S_SERVICE from KUBERNETES_OTEL_TOPO events",
+        "matcher": "isNotNull(k8s.cluster.uid) and isNotNull(k8s.namespace.name) and isNotNull(k8s.service.name)",
+        "smartscapeNode": {
+          "nodeType": "K8S_SERVICE",
+          "nodeIdFieldName": "dt.smartscape.k8s_service",
+          "extractNode": true,
+          "idComponents": [
+            {
+              "idComponent": "k8s.cluster.uid",
+              "referencedFieldName": "k8s.cluster.uid"
+            },
+            {
+              "idComponent": "k8s.namespace.name",
+              "referencedFieldName": "k8s.namespace.name"
+            },
+            {
+              "idComponent": "k8s.service.name",
+              "referencedFieldName": "k8s.service.name"
+            }
+          ],
+          "nodeName": {
+            "type": "field",
+            "field": {
+              "sourceFieldName": "k8s.service.name"
+            }
+          },
+          "fieldsToExtract": [
+            {
+              "fieldName": "k8s.cluster.name",
+              "referencedFieldName": "k8s.cluster.name",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.namespace.name",
+              "referencedFieldName": "k8s.namespace.name",
+              "strategy": "equals"
+            },
+            {
+              "fieldName": "k8s.cluster.uid",
+              "referencedFieldName": "k8s.cluster.uid"
+            },
+            {
+              "fieldName": "k8s.object",
+              "referencedFieldName": "k8s.object"
+            },
+            {
+              "fieldName": "k8s.service.name",
+              "referencedFieldName": "k8s.service.name"
+            }
+          ],
+          "staticEdgesToExtract": [
+            {
+              "edgeType": "belongs_to",
+              "targetType": "K8S_CLUSTER",
+              "targetIdFieldName": "dt.smartscape.k8s_cluster"
+            },
+            {
+              "edgeType": "belongs_to",
+              "targetType": "K8S_NAMESPACE",
+              "targetIdFieldName": "dt.smartscape.k8s_namespace"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "metricExtraction": {
+    "processors": [
+      {
+        "type": "counterMetric",
+        "id": "count-kubernetes-events",
+        "enabled": true,
+        "description": "Count KUBERNETES_EVENT log records into kubernetes.events metric",
+        "matcher": "event.provider == \"KUBERNETES_EVENT\"",
+        "counterMetric": {
+          "metricKey": "kubernetes.events",
+          "dimensions": [
+            {
+              "strategy": "equals",
+              "extractionType": "field",
+              "sourceFieldName": "dt.kubernetes.event.reason",
+              "destinationFieldName": "dt.kubernetes.event.reason"
+            },
+            {
+              "strategy": "equals",
+              "extractionType": "field",
+              "sourceFieldName": "event.category",
+              "destinationFieldName": "dt.kubernetes.event.type"
+            },
+            {
+              "strategy": "equals",
+              "extractionType": "field",
+              "sourceFieldName": "dt.kubernetes.event.involved_object.kind",
+              "destinationFieldName": "dt.kubernetes.event.involved_object.kind"
+            },
+            {
+              "strategy": "equals",
+              "extractionType": "field",
+              "sourceFieldName": "k8s.cluster.name",
+              "destinationFieldName": "k8s.cluster.name"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "storage": {
+    "processors": [
+      {
+        "type": "bucketAssignment",
+        "id": "store-default-logs",
+        "enabled": true,
+        "description": "Store K8s topology events and K8s events in default logs bucket",
+        "matcher": "true",
+        "bucketAssignment": {
+          "bucketName": "default_logs"
+        }
+      }
+    ]
+  }
+}

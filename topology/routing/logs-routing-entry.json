@@ -1,0 +1,7 @@
+{
+  "description": "${MARKER} Bluebox K8s OTel topology and events to custom:dt-k8s-otel-topology",
+  "enabled": true,
+  "matcher": "isNotNull(bluebox.collector.role) and (dt.openpipeline.source == \"custom:dt-k8s-otel-topology\" or matchesValue(event.provider, {\"KUBERNETES_OTEL_TOPO\",\"KUBERNETES_EVENT\"}))",
+  "pipelineType": "custom",
+  "pipelineId": "${PIPELINE_ID}"
+}

@@ -1,0 +1,22 @@
+name: custom:dt-k8s-otel-topology
+version: 1.3.3
+minDynatraceVersion: "1.330.0"
+author:
+  name: ""
+
+# Only the logs pipeline ships here. Metrics need no extension pipeline: DT's
+# built-in OTel metrics enrichment already attaches dt.smartscape.* IDs to
+# k8s metric data points, and the logs pipeline computes the same IDs (see the
+# idComponent notes in logs.pipeline.json) so metrics and topology entities line up.
+#
+# Logs need a routing rule (openpipeline/k8s-logs-routing.yaml) and there is
+# deliberately no logs ingest source here. dt.openpipeline.source is assigned
+# server-side from the ingest path, so an extension-type source only claims
+# data delivered via the extension execution path — not logs pushed straight
+# to /api/v2/otlp/v1/logs, which is how this collector exports. A logs source
+# would install cleanly and silently never match.
+openpipeline:
+  pipelines:
+    - displayName: "K8s OTel Logs: Topology + Events"
+      pipelinePath: "openpipeline/logs.pipeline.json"
+      configScope: logs

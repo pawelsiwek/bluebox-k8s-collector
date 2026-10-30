@@ -1,0 +1,36 @@
+[
+  {
+    "objectid": "ROUTING-OBJECT-ID-REDACTED",
+    "schemaid": "builtin:openpipeline.logs.routing",
+    "schemaversion": "1.77",
+    "scope": "environment",
+    "externalid": "",
+    "summary": "",
+    "value": {
+      "routingEntries": [
+        {
+          "description": "AWS VPC Flow Logs",
+          "enabled": true,
+          "matcher": "matchesValue(aws.log_group, \"*flow-logs*\") AND matchesValue(aws.log_group, \"*vpc*\")",
+          "pipelineId": "FOREIGN-PIPELINE-VPC-REDACTED",
+          "pipelineType": "custom"
+        },
+        {
+          "description": "AWS TGW Flow Logs",
+          "enabled": true,
+          "matcher": "matchesValue(aws.log_group, \"*flow-logs*\") AND matchesPhrase(aws.log_group, \"tgw\")",
+          "pipelineId": "FOREIGN-PIPELINE-TGW-REDACTED",
+          "pipelineType": "custom"
+        },
+        {
+          "description": "Team payments - all remaining app logs",
+          "enabled": false,
+          "matcher": "true",
+          "pipelineId": "FOREIGN-PIPELINE-PAYMENTS-REDACTED",
+          "pipelineType": "custom"
+        }
+      ]
+    },
+    "modificationinfo": null
+  }
+]
