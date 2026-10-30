@@ -1,0 +1,7 @@
+# AI overlay, cluster release: report the GPU health node condition
+# (`AcceleratedHardwareReady`, set by the GPU operator / node problem
+# detector on XID errors). The list is restated in full (Helm replaces lists).
+config:
+  receivers:
+    k8s_cluster:
+      node_conditions_to_report: [Ready, MemoryPressure, DiskPressure, PIDPressure, AcceleratedHardwareReady]

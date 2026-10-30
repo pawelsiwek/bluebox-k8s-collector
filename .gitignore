@@ -1,0 +1,4 @@
+# Pinned CI tools (scripts/ci/install-trivy.sh)
+.tools/
+# Rendered manifests from `make render`
+.out/

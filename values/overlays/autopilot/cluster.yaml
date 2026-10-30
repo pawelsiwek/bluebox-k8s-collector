@@ -1,0 +1,38 @@
+# GKE Autopilot overlay, cluster release. Self-contained: it repeats overlays/gke/cluster.yaml
+# (cloud provider, node cost labels), so pass it instead of, or after, the gke file.
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+    ephemeral-storage: 100Mi
+  limits:
+    cpu: 250m
+    memory: 512Mi
+    ephemeral-storage: 100Mi
+tolerations:
+  - key: cloud.google.com/gke-spot
+    operator: Equal
+    value: "true"
+    effect: NoSchedule
+  - key: cloud.google.com/compute-class
+    operator: Exists
+    effect: NoSchedule
+  - key: kubernetes.io/arch
+    operator: Equal
+    value: arm64
+    effect: NoSchedule
+
+# --- same as overlays/gke/cluster.yaml ---
+global:
+  bluebox:
+    cloudProvider: gcp
+config:
+  processors:
+    k8s_attributes:
+      extract:
+        labels:
+          - {tag_name: host.type, key: node.kubernetes.io/instance-type, from: node}
+          - {tag_name: cloud.region, key: topology.kubernetes.io/region, from: node}
+          - {tag_name: cloud.availability_zone, key: topology.kubernetes.io/zone, from: node}
+          - {tag_name: k8s.node.label.capacity_type, key: cloud.google.com/gke-provisioning, from: node}
+          - {tag_name: k8s.node.label.node_pool, key: cloud.google.com/gke-nodepool, from: node}

@@ -1,0 +1,44 @@
+# GKE Autopilot overlay, agent release. Self-contained: it repeats overlays/gke/agent.yaml
+# (cloud provider, node cost labels), so pass it instead of, or after, the gke file.
+# Autopilot admits a workload only within its partner-free envelope (the
+# Datadog pattern): no hostPort, no privileged, no nodes/proxy, hostPath only
+# /var/log read-only (pod-logs.agent.yaml mounts /var/log/pods read-only and
+# no checkpoint directory), explicit resource requests, and only the
+# tolerations Autopilot schedules on (no blanket `operator: Exists`).
+resources:
+  # Autopilot sets limits = requests; size for the 0.5 vCPU / 512 MiB floor.
+  requests:
+    cpu: 100m
+    memory: 256Mi
+    ephemeral-storage: 100Mi
+  limits:
+    cpu: 100m
+    memory: 256Mi
+    ephemeral-storage: 100Mi
+tolerations:
+  - key: cloud.google.com/gke-spot
+    operator: Equal
+    value: "true"
+    effect: NoSchedule
+  - key: cloud.google.com/compute-class
+    operator: Exists
+    effect: NoSchedule
+  - key: kubernetes.io/arch
+    operator: Equal
+    value: arm64
+    effect: NoSchedule
+
+# --- same as overlays/gke/agent.yaml ---
+global:
+  bluebox:
+    cloudProvider: gcp
+config:
+  processors:
+    k8s_attributes:
+      extract:
+        labels:
+          - {tag_name: host.type, key: node.kubernetes.io/instance-type, from: node}
+          - {tag_name: cloud.region, key: topology.kubernetes.io/region, from: node}
+          - {tag_name: cloud.availability_zone, key: topology.kubernetes.io/zone, from: node}
+          - {tag_name: k8s.node.label.capacity_type, key: cloud.google.com/gke-provisioning, from: node}
+          - {tag_name: k8s.node.label.node_pool, key: cloud.google.com/gke-nodepool, from: node}

@@ -1,0 +1,17 @@
+# AKS overlay, cluster release. Layer after values/cluster.yaml.
+# Node cost labels (C1): capacity type and node pool from the distribution's
+# node labels; no IMDS dependency. cloud.resource_id comes from the snippet
+# (global.bluebox.cloudResourceId) when the wizard knows it.
+global:
+  bluebox:
+    cloudProvider: azure
+config:
+  processors:
+    k8s_attributes:
+      extract:
+        labels:
+          - {tag_name: host.type, key: node.kubernetes.io/instance-type, from: node}
+          - {tag_name: cloud.region, key: topology.kubernetes.io/region, from: node}
+          - {tag_name: cloud.availability_zone, key: topology.kubernetes.io/zone, from: node}
+          - {tag_name: k8s.node.label.capacity_type, key: kubernetes.azure.com/scalesetpriority, from: node}
+          - {tag_name: k8s.node.label.node_pool, key: kubernetes.azure.com/agentpool, from: node}

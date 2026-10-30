@@ -1,0 +1,3 @@
+# Live read runs entirely in the cluster release; this file exists so the
+# snippet can pass -f overlays/live-read/<role>.yaml for both roles.
+{}

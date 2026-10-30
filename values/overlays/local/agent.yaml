@@ -1,0 +1,13 @@
+# Local overlay (kind, minikube, Docker Desktop), agent release. Install with
+# pod-logs.agent.yaml: logs are on by default for local clusters.
+# Low RAM, works on arm64 (the image index is multi-arch), kubelet TLS unverified.
+global:
+  bluebox:
+    podLogs:
+      namespaces: ["*"]
+resources:
+  requests:
+    cpu: 20m
+    memory: 64Mi
+  limits:
+    memory: 256Mi

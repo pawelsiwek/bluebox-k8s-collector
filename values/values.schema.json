@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/pawelsiwek/bluebox-k8s-collector/values/values.schema.json",
+  "title": "Bluebox collector values (global.bluebox)",
+  "description": "Bluebox knobs layered on the upstream open-telemetry/opentelemetry-collector chart. The upstream schema rejects unknown top-level keys, so they live under global.bluebox. Helm does not apply this schema; `make schema` validates every values file and the wizard validates the snippet inputs against it.",
+  "type": "object",
+  "properties": {
+    "global": {
+      "type": "object",
+      "properties": {
+        "bluebox": {"$ref": "#/$defs/bluebox"}
+      }
+    }
+  },
+  "$defs": {
+    "dnsLabelOrStar": {
+      "type": "string",
+      "anyOf": [
+        {"const": "*"},
+        {"pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"}
+      ]
+    },
+    "pinnedImage": {
+      "type": "string",
+      "pattern": "^[a-z0-9.-]+(:[0-9]+)?/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$"
+    },
+    "bluebox": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "collectorVersion": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"},
+        "clusterUid": {
+          "description": "kube-system namespace UID. Empty means looked up at install; required for helm template / GitOps.",
+          "type": "string",
+          "pattern": "^$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "clusterName": {"type": "string", "maxLength": 253, "pattern": "^[^\\x00-\\x1f\"'{}`$,\\\\]*$"},
+        "endpoint": {"type": "string", "pattern": "^$|^https://[^/\\s]+/api/v2/otlp/?$"},
+        "tokenSecretName": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$"},
+        "tokenScheme": {"enum": ["Bearer", "Api-Token"]},
+        "cloudProvider": {"enum": ["", "aws", "azure", "gcp"]},
+        "cloudResourceId": {"type": "string", "maxLength": 1024},
+        "proxy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "httpsProxy": {"type": "string", "pattern": "^$|^https?://"},
+            "noProxy": {"type": "string"}
+          }
+        },
+        "caBundle": {"type": "boolean"},
+        "podLogs": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "namespaces": {
+              "type": "array",
+              "items": {"$ref": "#/$defs/dnsLabelOrStar"},
+              "uniqueItems": true
+            }
+          }
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "allow": {"type": "array", "items": {"type": "string", "pattern": "^[^\"\\\\]+$"}},
+            "extraAllow": {"type": "array", "items": {"type": "string", "pattern": "^[^\"\\\\]+$"}}
+          }
+        },
+        "probe": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {"image": {"$ref": "#/$defs/pinnedImage"}}
+        },
+        "liveRead": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "edgeConnectName": {"type": "string"},
+            "apiEndpointHost": {"type": "string", "pattern": "^$|^[a-z0-9.-]+$"},
+            "oauthResource": {"type": "string", "pattern": "^$|^urn:dtenvironment:[a-z0-9]+$"},
+            "oauthEndpoint": {"type": "string", "pattern": "^https://"},
+            "edgeConnectImage": {"$ref": "#/$defs/pinnedImage"},
+            "mcpServerImage": {"$ref": "#/$defs/pinnedImage"},
+            "redactorImage": {"$ref": "#/$defs/pinnedImage"}
+          }
+        }
+      }
+    }
+  }
+}

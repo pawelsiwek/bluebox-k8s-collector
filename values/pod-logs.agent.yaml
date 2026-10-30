@@ -1,0 +1,82 @@
+# Pod logs, agent release only. Opt-in for production clusters; the `local`
+# install path always adds it.
+#
+# What turning this on changes (shown in the security preview):
+#   - hostPath /var/log/pods, read-only. No checkpoint hostPath: offsets are
+#     not persisted, so a restart re-reads from the end of each file and logs
+#     written while the pod was down are lost (README: log loss window).
+#   - the container runs as uid 0 because kubelet writes pod logs 0640
+#     root:root; all capabilities stay dropped, root filesystem read-only.
+#   - the namespace must carry pod-security.kubernetes.io/enforce=privileged
+#     (hostPath is not allowed by `baseline` or `restricted`). The install
+#     snippet sets that label only on this path.
+#
+# Namespace allowlist: global.bluebox.podLogs.namespaces (required, non-empty;
+# "*" means all). kube-system and the collector namespace are always excluded.
+
+podSecurityContext:
+  runAsNonRoot: false
+  runAsUser: 0
+  runAsGroup: 0
+  fsGroup: 0
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  runAsNonRoot: false
+  runAsUser: 0
+  runAsGroup: 0
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  privileged: false
+  capabilities:
+    drop: [ALL]
+  seccompProfile:
+    type: RuntimeDefault
+
+extraVolumes:
+  - name: bluebox-token
+    secret:
+      secretName: '{{ .Values.global.bluebox.tokenSecretName }}'
+      defaultMode: 0440
+  - name: bluebox-ca
+    configMap:
+      name: bluebox-otelcol-ca
+      optional: true
+  - name: varlogpods
+    hostPath:
+      path: /var/log/pods
+      type: Directory
+extraVolumeMounts:
+  - name: bluebox-token
+    mountPath: /var/run/secrets/bluebox
+    readOnly: true
+  - name: bluebox-ca
+    mountPath: /etc/bluebox/ca
+    readOnly: true
+  - name: varlogpods
+    mountPath: /var/log/pods
+    readOnly: true
+
+config:
+  receivers:
+    file_log/pods:
+      include:
+        - '{{ if not .Values.global.bluebox.podLogs.namespaces }}{{ fail "global.bluebox.podLogs.namespaces_must_not_be_empty_with_pod-logs.agent.yaml" }}{{ end }}/var/log/pods/{{ "{" }}{{ join "," .Values.global.bluebox.podLogs.namespaces }}{{ "}" }}_*/*/*.log'
+      exclude:
+        - /var/log/pods/kube-system_*/*/*.log
+        - '/var/log/pods/{{ .Release.Namespace }}_*/*/*.log'
+      start_at: end
+      include_file_path: true
+      include_file_name: false
+      max_log_size: 1MiB
+      operators:
+        # CRI/containerd format; derives namespace, pod name/uid and container
+        # from the file path.
+        - id: container-parser
+          type: container
+  service:
+    pipelines:
+      logs/pods:
+        receivers: [file_log/pods]
+        processors: [memory_limiter, k8s_attributes, resource/bluebox, transform/drop_empty, transform/workload, batch]
+        exporters: [otlp_http/bluebox]

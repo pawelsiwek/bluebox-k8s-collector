@@ -1,0 +1,316 @@
+# Bluebox collector packaging: values shared by both releases.
+#
+# Chart:  open-telemetry/opentelemetry-collector 0.177.0 (appVersion 0.163.2)
+# Layer order (later wins; Helm merges maps and REPLACES lists):
+#   common.yaml -> agent.yaml | cluster.yaml -> [pod-logs.agent.yaml] -> overlays/<distro>/<role>.yaml -> overlays/ai|live-read/<role>.yaml
+#
+# Bluebox knobs live under global.bluebox because the upstream chart schema
+# rejects unknown top-level keys. They are consumed through `tpl` in config,
+# extraEnvs and extraManifests. bluebox/values.schema.json validates them.
+
+global:
+  bluebox:
+    # Values-file release; also emitted as bluebox.collector.version (C1).
+    collectorVersion: "0.1.0"
+    # kube-system namespace UID. Empty = resolved with `lookup` at install time.
+    # `helm template` (GitOps) has no cluster access, so it must be set there.
+    clusterUid: ""
+    # Display name from the wizard (C1 k8s.cluster.name).
+    clusterName: ""
+    # Dynatrace OTLP base URL, e.g. https://<env>.live.dynatrace.com/api/v2/otlp
+    endpoint: ""
+    # Secret holding the ingest token under key `token` (mounted as a file).
+    tokenSecretName: bluebox-otelcol-token
+    # Authorization scheme: Bearer for platform tokens (dt0s16), Api-Token for classic (dt0c01).
+    tokenScheme: Bearer
+    # Best-effort C1 cloud attributes. Set by the distro overlay or the snippet.
+    cloudProvider: ""
+    cloudResourceId: ""
+    # Corporate egress: HTTPS proxy and an extra CA bundle (ConfigMap
+    # `bluebox-otelcol-ca`, key `ca.crt`, created by the user when caBundle=true).
+    proxy:
+      httpsProxy: ""
+      noProxy: ".svc,.cluster.local,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+    caBundle: false
+    # Pod logs (agent, only with pod-logs.agent.yaml). kube-system and the
+    # collector namespace are always excluded, even when listed here.
+    podLogs:
+      namespaces: []
+    # Low-data metric allowlist: anchored RE2 alternatives matched against the
+    # metric name; write a literal dot as [.] (OTTL strings reject \.).
+    # Overlays append through `extraAllow` (lists are not merged).
+    metrics:
+      allow:
+        # Heartbeat and exporter health (C1 heartbeat; C4 `reachable`).
+        - otelcol_process_uptime.*
+        - otelcol_exporter_sent_.*
+        - otelcol_exporter_send_failed_.*
+        # kubeletstats (agent)
+        - k8s[.]node[.]cpu[.]usage
+        - k8s[.]node[.]memory[.]working_set
+        - k8s[.]node[.]filesystem[.](usage|capacity)
+        - k8s[.]node[.]network[.](io|errors)
+        - k8s[.]pod[.]cpu[.]usage
+        - k8s[.]pod[.]memory[.]working_set
+        - k8s[.]pod[.]network[.](io|errors)
+        - container[.]cpu[.]usage
+        - container[.]memory[.]working_set
+        - k8s[.]volume[.](available|capacity)
+        # k8s_cluster (cluster)
+        - k8s[.]pod[.]phase
+        - k8s[.]pod[.]status_reason
+        - k8s[.]container[.](restarts|ready|status[.]reason)
+        - k8s[.]container[.](cpu|memory)_(request|limit)
+        - k8s[.]node[.]condition
+        - k8s[.]node[.]allocatable_(cpu|memory|pods)
+        - k8s[.]namespace[.]phase
+        - k8s[.]deployment[.](available|desired)
+        - k8s[.]statefulset[.](ready_pods|desired_pods)
+        - k8s[.]daemonset[.](ready_nodes|desired_scheduled_nodes|misscheduled_nodes)
+        - k8s[.]replicaset[.](available|desired)
+        - k8s[.]job[.](active_pods|failed_pods|successful_pods)
+        - k8s[.]cronjob[.]active_jobs
+      extraAllow: []
+    # helm test probe (C4). Pinned by digest; owner bumps on CVE.
+    probe:
+      image: docker.io/curlimages/curl@sha256:11e64e28c5f58c8d93ee95fcf22ac055f48b0bc440e0ce7d8013bbb5ad6aa8ac
+
+# Bluebox collector image (bridge): the Dynatrace OTel distribution v0.58.1 plus the
+# Kubernetes topology components (dtk8stopology, dtk8seventsprocessor, alertingengine).
+# Built from collector/ in this repository (collector/README.md).
+# TODO: set tag + digest from the first published release (a repository tag vX.Y.Z publishes
+# image tag X.Y.Z); until then validate.sh and the tests use a locally built image
+# (BLUEBOX_IMAGE, default localhost/bluebox-otelcol:dev; `make -C collector image`).
+# Switch to the stock Dynatrace image with overlays/dynatrace-image/<role>.yaml.
+image:
+  repository: ghcr.io/pawelsiwek/bluebox-otelcol
+  tag: "0.1.0"
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  pullPolicy: IfNotPresent
+command:
+  name: bluebox-otelcol
+  extraArgs:
+    # Semconv v1 for Kubernetes, set explicitly so a future default flip
+    # cannot change emitted attribute names (C1).
+    - --feature-gates=processor.k8sattributes.EmitV1K8sConventions,processor.k8sattributes.DontEmitV0K8sConventions
+
+rewriteDeprecatedComponentNames: true
+
+serviceAccount:
+  create: true
+  automountServiceAccountToken: true
+
+# Hardened defaults: non-root 65532 / gid 0, no privilege escalation, drop ALL,
+# RuntimeDefault seccomp, read-only root filesystem. PSA `restricted` compliant.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 0
+  fsGroup: 0
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 0
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  privileged: false
+  capabilities:
+    drop: [ALL]
+  seccompProfile:
+    type: RuntimeDefault
+
+useGOMEMLIMIT: true
+
+# The token Secret is mounted as a directory (never subPath) so kubelet
+# rotation reaches the file; bearertokenauth re-reads it without a restart.
+extraVolumes:
+  - name: bluebox-token
+    secret:
+      secretName: '{{ .Values.global.bluebox.tokenSecretName }}'
+      defaultMode: 0440
+  - name: bluebox-ca
+    configMap:
+      name: bluebox-otelcol-ca
+      optional: true
+extraVolumeMounts:
+  - name: bluebox-token
+    mountPath: /var/run/secrets/bluebox
+    readOnly: true
+  - name: bluebox-ca
+    mountPath: /etc/bluebox/ca
+    readOnly: true
+
+extraEnvs:
+  - name: K8S_CLUSTER_UID
+    value: '{{ required "global.bluebox.clusterUid_is_required_(no_cluster_lookup_in_helm_template)" (.Values.global.bluebox.clusterUid | default (dig "metadata" "uid" "" (lookup "v1" "Namespace" "" "kube-system"))) }}'
+  - name: K8S_CLUSTER_NAME
+    value: '{{ required "global.bluebox.clusterName_is_required" .Values.global.bluebox.clusterName }}'
+  - name: BLUEBOX_ENDPOINT
+    value: '{{ required "global.bluebox.endpoint_is_required" .Values.global.bluebox.endpoint }}'
+  - name: HTTPS_PROXY
+    value: '{{ .Values.global.bluebox.proxy.httpsProxy }}'
+  - name: NO_PROXY
+    value: '{{ .Values.global.bluebox.proxy.noProxy }}'
+
+ports:
+  # No hostPort anywhere (fails PSA baseline). The agent re-enables OTLP
+  # without hostPort for the app intake Service.
+  otlp:
+    enabled: false
+    hostPort: null
+  otlp-http:
+    enabled: false
+    hostPort: null
+  jaeger-compact:
+    enabled: false
+    hostPort: null
+  jaeger-thrift:
+    enabled: false
+    hostPort: null
+  jaeger-grpc:
+    enabled: false
+    hostPort: null
+  zipkin:
+    enabled: false
+    hostPort: null
+  metrics:
+    enabled: false
+
+config:
+  extensions:
+    health_check:
+      endpoint: ${env:MY_POD_IP}:13133
+    bearertokenauth:
+      filename: /var/run/secrets/bluebox/token
+      scheme: '{{ .Values.global.bluebox.tokenScheme }}'
+      # Block startup until the token file is readable; give up visibly
+      # (CrashLoopBackOff) after ~5 minutes instead of exporting unauthenticated.
+      wait_for_token_file: true
+      retry_on_failure:
+        enabled: true
+        max_retries: 60
+        interval: 5s
+  receivers:
+    jaeger: null
+    zipkin: null
+    prometheus: null
+    # Loopback receiver for the collector's own telemetry (heartbeat).
+    # The SDK exporter cannot use bearertokenauth, so self-telemetry is sent
+    # here and leaves through the authenticated exporter.
+    otlp/self:
+      protocols:
+        http:
+          endpoint: 127.0.0.1:14318
+  processors:
+    batch:
+      timeout: 10s
+      send_batch_size: 1000
+    memory_limiter:
+      check_interval: 5s
+      limit_percentage: 80
+      spike_limit_percentage: 25
+    # C1 resource attributes on every signal.
+    resource/bluebox:
+      attributes:
+        - {key: k8s.cluster.uid, value: "${env:K8S_CLUSTER_UID}", action: upsert}
+        - {key: k8s.cluster.name, value: "${env:K8S_CLUSTER_NAME}", action: upsert}
+        - {key: bluebox.collector.version, value: '{{ .Values.global.bluebox.collectorVersion }}', action: upsert}
+        - {key: bluebox.collector.role, value: '{{ if eq .Values.mode "daemonset" }}agent{{ else }}cluster{{ end }}', action: upsert}
+        - {key: cloud.provider, value: '{{ .Values.global.bluebox.cloudProvider }}', action: insert}
+        - {key: cloud.resource_id, value: '{{ .Values.global.bluebox.cloudResourceId }}', action: insert}
+    # Drop empty best-effort attributes so they are omitted, not blank (C1).
+    transform/drop_empty:
+      error_mode: ignore
+      metric_statements:
+        - delete_key(resource.attributes, "cloud.provider") where resource.attributes["cloud.provider"] == ""
+        - delete_key(resource.attributes, "cloud.resource_id") where resource.attributes["cloud.resource_id"] == ""
+      log_statements:
+        - delete_key(resource.attributes, "cloud.provider") where resource.attributes["cloud.provider"] == ""
+        - delete_key(resource.attributes, "cloud.resource_id") where resource.attributes["cloud.resource_id"] == ""
+      trace_statements:
+        - delete_key(resource.attributes, "cloud.provider") where resource.attributes["cloud.provider"] == ""
+        - delete_key(resource.attributes, "cloud.resource_id") where resource.attributes["cloud.resource_id"] == ""
+    # k8s.workload.name / kind, which dt-obs-otel-kubernetes keys on.
+    transform/workload:
+      error_mode: ignore
+      metric_statements:
+        - context: resource
+          statements: &workload_statements
+            - set(attributes["k8s.workload.name"], attributes["k8s.deployment.name"]) where attributes["k8s.deployment.name"] != nil and attributes["k8s.workload.name"] == nil
+            - set(attributes["k8s.workload.kind"], "deployment") where attributes["k8s.deployment.name"] != nil and attributes["k8s.workload.kind"] == nil
+            - set(attributes["k8s.workload.name"], attributes["k8s.statefulset.name"]) where attributes["k8s.statefulset.name"] != nil and attributes["k8s.workload.name"] == nil
+            - set(attributes["k8s.workload.kind"], "statefulset") where attributes["k8s.statefulset.name"] != nil and attributes["k8s.workload.kind"] == nil
+            - set(attributes["k8s.workload.name"], attributes["k8s.cronjob.name"]) where attributes["k8s.cronjob.name"] != nil and attributes["k8s.workload.name"] == nil
+            - set(attributes["k8s.workload.kind"], "cronjob") where attributes["k8s.cronjob.name"] != nil and attributes["k8s.workload.kind"] == nil
+            - set(attributes["k8s.workload.name"], attributes["k8s.daemonset.name"]) where attributes["k8s.daemonset.name"] != nil and attributes["k8s.workload.name"] == nil
+            - set(attributes["k8s.workload.kind"], "daemonset") where attributes["k8s.daemonset.name"] != nil and attributes["k8s.workload.kind"] == nil
+            - set(attributes["k8s.workload.name"], attributes["k8s.job.name"]) where attributes["k8s.job.name"] != nil and attributes["k8s.workload.name"] == nil
+            - set(attributes["k8s.workload.kind"], "job") where attributes["k8s.job.name"] != nil and attributes["k8s.workload.kind"] == nil
+            - set(attributes["k8s.workload.name"], attributes["k8s.replicaset.name"]) where attributes["k8s.replicaset.name"] != nil and attributes["k8s.workload.name"] == nil
+            - set(attributes["k8s.workload.kind"], "replicaset") where attributes["k8s.replicaset.name"] != nil and attributes["k8s.workload.kind"] == nil
+      log_statements:
+        - context: resource
+          statements: *workload_statements
+      trace_statements:
+        - context: resource
+          statements: *workload_statements
+    # Low-data allowlist: drop every metric whose name is not allowlisted.
+    filter/allowlist:
+      error_mode: ignore
+      metrics:
+        metric:
+          - 'not IsMatch(name, "^(?:{{ join "|" (concat .Values.global.bluebox.metrics.allow .Values.global.bluebox.metrics.extraAllow) }})$")'
+  exporters:
+    debug: null
+    otlp_http/bluebox:
+      endpoint: ${env:BLUEBOX_ENDPOINT}
+      auth:
+        authenticator: bearertokenauth
+      tls:
+        ca_file: '{{ if .Values.global.bluebox.caBundle }}/etc/bluebox/ca/ca.crt{{ end }}'
+      sending_queue:
+        enabled: true
+        queue_size: 1000
+      retry_on_failure:
+        enabled: true
+        max_elapsed_time: 300s
+  service:
+    extensions:
+      - health_check
+      - bearertokenauth
+    telemetry:
+      resource:
+        k8s.cluster.uid: ${env:K8S_CLUSTER_UID}
+        k8s.cluster.name: ${env:K8S_CLUSTER_NAME}
+        bluebox.collector.version: '{{ .Values.global.bluebox.collectorVersion }}'
+        bluebox.collector.role: '{{ if eq .Values.mode "daemonset" }}agent{{ else }}cluster{{ end }}'
+      logs:
+        level: info
+        encoding: json
+      metrics:
+        level: basic
+        readers:
+          - periodic:
+              interval: 30000
+              exporter:
+                otlp:
+                  protocol: http/protobuf
+                  endpoint: http://127.0.0.1:14318
+                  insecure: true
+    pipelines:
+      logs: null
+      traces: null
+      metrics: null
+      metrics/self:
+        receivers: [otlp/self]
+        processors: [memory_limiter, resource/bluebox, transform/drop_empty, filter/allowlist, batch]
+        exporters: [otlp_http/bluebox]
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi

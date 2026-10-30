@@ -1,0 +1,83 @@
+# AI overlay, agent release. Offered only when the verify job detects GPU or
+# inference metrics (C4 `gpu`). Layer last.
+#
+# Each node collector scrapes only pods on its own node, keeps an explicit
+# metric allowlist, drops `pod_uid`, and renames vLLM's pre-0.10
+# `vllm:gpu_cache_usage_perc` to `vllm:kv_cache_usage_perc`.
+# Targets: NVIDIA DCGM exporter (GPU Operator label app=nvidia-dcgm-exporter,
+# port 9400), AMD device-metrics-exporter (label
+# app.kubernetes.io/name=metrics-exporter, port 5000), and any pod annotated
+# prometheus.io/scrape=true (vLLM, Triton, Gateway API Inference Extension
+# EPP). Label conventions are the upstream defaults; adjust per cluster.
+global:
+  bluebox:
+    metrics:
+      extraAllow:
+        - DCGM_FI_DEV_(GPU_UTIL|FB_USED|FB_FREE|GPU_TEMP|POWER_USAGE|XID_ERRORS)
+        - DCGM_FI_PROF_GR_ENGINE_ACTIVE
+        - gpu_(gfx_activity|used_vram|total_vram|power_usage|junction_temperature)
+        - 'vllm:(num_requests_running|num_requests_waiting|kv_cache_usage_perc|time_to_first_token_seconds|e2e_request_latency_seconds|prompt_tokens(_total)?|generation_tokens(_total)?)'
+        - nv_inference_(request_success|request_failure|queue_duration_us|compute_infer_duration_us)
+        - nv_gpu_utilization
+        - inference_pool_(average_kv_cache_utilization|average_queue_size|ready_pods)
+        - inference_(objective|model)_request(_total)?
+config:
+  receivers:
+    prometheus/ai:
+      config:
+        scrape_configs:
+          - job_name: dcgm
+            scrape_interval: 30s
+            kubernetes_sd_configs:
+              - role: pod
+                selectors:
+                  - role: pod
+                    field: spec.nodeName=${env:OTEL_K8S_NODE_NAME}
+            relabel_configs: &keep_pod_meta
+              - {action: keep, source_labels: [__meta_kubernetes_pod_label_app], regex: nvidia-dcgm-exporter}
+              - {action: keep, source_labels: [__meta_kubernetes_pod_container_port_number], regex: "9400"}
+            metric_relabel_configs: &ai_metric_relabel
+              - source_labels: [__name__]
+                regex: vllm:gpu_cache_usage_perc
+                target_label: __name__
+                replacement: vllm:kv_cache_usage_perc
+              - action: keep
+                source_labels: [__name__]
+                regex: (DCGM_FI_DEV_(GPU_UTIL|FB_USED|FB_FREE|GPU_TEMP|POWER_USAGE|XID_ERRORS)|DCGM_FI_PROF_GR_ENGINE_ACTIVE|gpu_(gfx_activity|used_vram|total_vram|power_usage|junction_temperature)|vllm:(num_requests_running|num_requests_waiting|kv_cache_usage_perc|time_to_first_token_seconds_.*|e2e_request_latency_seconds_.*|prompt_tokens_total|generation_tokens_total)|nv_inference_(request_success|request_failure|queue_duration_us|compute_infer_duration_us)|nv_gpu_utilization|inference_pool_(average_kv_cache_utilization|average_queue_size|ready_pods)|inference_(objective|model)_request_total)
+              - action: labeldrop
+                regex: pod_uid
+          - job_name: amd-gpu
+            scrape_interval: 30s
+            kubernetes_sd_configs:
+              - role: pod
+                selectors:
+                  - role: pod
+                    field: spec.nodeName=${env:OTEL_K8S_NODE_NAME}
+            relabel_configs:
+              - {action: keep, source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name], regex: metrics-exporter}
+              - {action: keep, source_labels: [__meta_kubernetes_pod_container_port_number], regex: "5000"}
+            metric_relabel_configs: *ai_metric_relabel
+          - job_name: inference-annotated
+            scrape_interval: 30s
+            kubernetes_sd_configs:
+              - role: pod
+                selectors:
+                  - role: pod
+                    field: spec.nodeName=${env:OTEL_K8S_NODE_NAME}
+            relabel_configs:
+              - {action: keep, source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape], regex: "true"}
+              - {action: replace, source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path], regex: (.+), target_label: __metrics_path__}
+              - action: replace
+                source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+                regex: ([^:]+)(?::\d+)?;(\d+)
+                replacement: $$1:$$2
+                target_label: __address__
+              - {action: replace, source_labels: [__meta_kubernetes_namespace], target_label: k8s_namespace_name}
+              - {action: replace, source_labels: [__meta_kubernetes_pod_name], target_label: k8s_pod_name}
+            metric_relabel_configs: *ai_metric_relabel
+  service:
+    pipelines:
+      metrics/ai:
+        receivers: [prometheus/ai]
+        processors: [memory_limiter, k8s_attributes, resource/bluebox, transform/drop_empty, transform/workload, filter/allowlist, batch]
+        exporters: [otlp_http/bluebox]

@@ -1,0 +1,294 @@
+# Release `bluebox-otelcol-agent`: DaemonSet, one pod per node.
+# kubeletstats, app OTLP intake (Service, internalTrafficPolicy Local, no
+# hostPort) and, with pod-logs.agent.yaml, pod logs from allowlisted namespaces.
+# Layer on top of common.yaml.
+
+mode: daemonset
+# DaemonSet bluebox-otelcol-agent, app intake Service bluebox-otelcol.
+fullnameOverride: bluebox-otelcol
+
+# RBAC: read-only, no nodes/proxy. nodes/stats is all kubeletstats needs.
+clusterRole:
+  create: true
+  rules:
+    - apiGroups: [""]
+      resources: [nodes/stats]
+      verbs: [get]
+    - apiGroups: [""]
+      resources: [nodes, pods, namespaces]
+      verbs: [get, list, watch]
+    - apiGroups: [apps]
+      resources: [replicasets, deployments, statefulsets, daemonsets]
+      verbs: [get, list, watch]
+    - apiGroups: [batch]
+      resources: [jobs, cronjobs]
+      verbs: [get, list, watch]
+
+ports:
+  otlp:
+    enabled: true
+    containerPort: 4317
+    servicePort: 4317
+    hostPort: null
+    protocol: TCP
+    appProtocol: grpc
+  otlp-http:
+    enabled: true
+    containerPort: 4318
+    servicePort: 4318
+    hostPort: null
+    protocol: TCP
+
+# App OTLP intake: in-cluster apps send to
+# bluebox-otelcol-agent.<ns>.svc:4317/4318 and stay on their own node.
+service:
+  enabled: true
+  type: ClusterIP
+  internalTrafficPolicy: Local
+
+priorityClassName: bluebox-otelcol-agent
+tolerations:
+  # A node-level collector must run on every node, including tainted ones.
+  - operator: Exists
+    effect: NoSchedule
+rollout:
+  rollingUpdate:
+    maxUnavailable: 1
+  strategy: RollingUpdate
+# Drain gap: the pod gets this long to flush its queue on eviction (README).
+terminationGracePeriodSeconds: 30
+
+config:
+  receivers:
+    kubelet_stats:
+      collection_interval: 60s
+      auth_type: serviceAccount
+      endpoint: https://${env:OTEL_K8S_NODE_IP}:10250
+      # Kubelet serving certs are not signed by the cluster CA on every
+      # distribution (EKS, kind). Verified TLS is an overlay opt-in; the
+      # security preview prints the mode.
+      insecure_skip_verify: true
+      metric_groups: [node, pod, container, volume]
+      k8s_api_config:
+        auth_type: serviceAccount
+    otlp:
+      protocols:
+        grpc:
+          endpoint: ${env:MY_POD_IP}:4317
+        http:
+          endpoint: ${env:MY_POD_IP}:4318
+  processors:
+    k8s_attributes:
+      auth_type: serviceAccount
+      passthrough: false
+      filter:
+        node_from_env_var: OTEL_K8S_NODE_NAME
+      extract:
+        metadata:
+          - k8s.namespace.name
+          - k8s.pod.name
+          - k8s.pod.uid
+          - k8s.node.name
+          - k8s.container.name
+          - container.image.name
+          - container.image.tags
+          - k8s.deployment.name
+          - k8s.statefulset.name
+          - k8s.daemonset.name
+          - k8s.replicaset.name
+          - k8s.job.name
+          - k8s.cronjob.name
+        # Node cost labels (C1). Distribution overlays add capacity type and pool.
+        labels: &node_cost_labels
+          - {tag_name: host.type, key: node.kubernetes.io/instance-type, from: node}
+          - {tag_name: cloud.region, key: topology.kubernetes.io/region, from: node}
+          - {tag_name: cloud.availability_zone, key: topology.kubernetes.io/zone, from: node}
+      pod_association:
+        - sources:
+            - from: resource_attribute
+              name: k8s.pod.uid
+        - sources:
+            - from: resource_attribute
+              name: k8s.pod.ip
+        - sources:
+            - from: connection
+  service:
+    pipelines:
+      metrics:
+        receivers: [kubelet_stats]
+        processors: [memory_limiter, k8s_attributes, resource/bluebox, transform/drop_empty, transform/workload, filter/allowlist, batch]
+        exporters: [otlp_http/bluebox]
+      # App OTLP intake: passed through (no allowlist on app telemetry).
+      metrics/apps:
+        receivers: [otlp]
+        processors: [memory_limiter, k8s_attributes, resource/bluebox, transform/drop_empty, transform/workload, batch]
+        exporters: [otlp_http/bluebox]
+      traces/apps:
+        receivers: [otlp]
+        processors: [memory_limiter, k8s_attributes, resource/bluebox, transform/drop_empty, transform/workload, batch]
+        exporters: [otlp_http/bluebox]
+      logs/apps:
+        receivers: [otlp]
+        processors: [memory_limiter, k8s_attributes, resource/bluebox, transform/drop_empty, transform/workload, batch]
+        exporters: [otlp_http/bluebox]
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 384Mi
+
+extraManifests:
+  # Node collectors outrank ordinary workloads so a full node cannot starve them.
+  - apiVersion: scheduling.k8s.io/v1
+    kind: PriorityClass
+    metadata:
+      name: bluebox-otelcol-agent
+      labels:
+        app.kubernetes.io/part-of: bluebox-otelcol
+    value: 1000000
+    globalDefault: false
+    preemptionPolicy: PreemptLowerPriority
+    description: Bluebox OpenTelemetry node collector.
+  # ---- helm test probe (C4 `helm test` output) ----
+  # `helm test bluebox-otelcol-agent -n <ns> --logs` prints one key=value
+  # per line and the hook exits 0 only when ready=true. A Pod rather than a
+  # Job because `helm test --logs` only collects logs from Pod hooks.
+  # The token is read from the mounted Secret into a header file on an
+  # emptyDir and never printed or passed on argv.
+  - apiVersion: v1
+    kind: Pod
+    metadata:
+      name: bluebox-otelcol-probe
+      namespace: '{{ .Release.Namespace }}'
+      labels:
+        app.kubernetes.io/part-of: bluebox-otelcol
+        app.kubernetes.io/component: probe
+      annotations:
+        helm.sh/hook: test
+        helm.sh/hook-delete-policy: before-hook-creation
+    spec:
+      restartPolicy: Never
+      serviceAccountName: bluebox-otelcol
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 0
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: probe
+          image: '{{ .Values.global.bluebox.probe.image }}'
+          command: [/bin/sh, /probe/probe.sh]
+          env:
+            - name: BLUEBOX_ENDPOINT
+              value: '{{ .Values.global.bluebox.endpoint }}'
+            - name: TOKEN_SCHEME
+              value: '{{ .Values.global.bluebox.tokenScheme }}'
+            - name: COLLECTOR_VERSION
+              value: '{{ .Values.global.bluebox.collectorVersion }}'
+            - name: K8S_CLUSTER_UID
+              value: '{{ .Values.global.bluebox.clusterUid | default (dig "metadata" "uid" "" (lookup "v1" "Namespace" "" "kube-system")) }}'
+            - name: HTTPS_PROXY
+              value: '{{ .Values.global.bluebox.proxy.httpsProxy }}'
+            - name: NO_PROXY
+              value: '{{ .Values.global.bluebox.proxy.noProxy }}'
+            - name: CA_FILE
+              value: '{{ if .Values.global.bluebox.caBundle }}/etc/bluebox/ca/ca.crt{{ end }}'
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 64Mi}
+          volumeMounts:
+            - {name: probe, mountPath: /probe, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+            - {name: bluebox-token, mountPath: /var/run/secrets/bluebox, readOnly: true}
+            - {name: bluebox-ca, mountPath: /etc/bluebox/ca, readOnly: true}
+      volumes:
+        - name: probe
+          configMap: {name: bluebox-otelcol-probe}
+        - name: tmp
+          emptyDir: {medium: Memory, sizeLimit: 1Mi}
+        - name: bluebox-token
+          secret: {secretName: '{{ .Values.global.bluebox.tokenSecretName }}', defaultMode: 0440}
+        - name: bluebox-ca
+          configMap: {name: bluebox-otelcol-ca, optional: true}
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: bluebox-otelcol-probe
+      namespace: '{{ .Release.Namespace }}'
+      labels:
+        app.kubernetes.io/part-of: bluebox-otelcol
+        app.kubernetes.io/component: probe
+    data:
+      probe.sh: |
+        #!/bin/sh
+        # C4 helm test probe. Output: key=value lines only. Never prints the token.
+        set -u
+        TOKEN_FILE=/var/run/secrets/bluebox/token
+        SA=/var/run/secrets/kubernetes.io/serviceaccount
+        H=/tmp/otlp-headers
+        cacert=""
+        [ -n "${CA_FILE:-}" ] && [ -s "$CA_FILE" ] && cacert="--cacert $CA_FILE"
+
+        # OTLP probe: an empty, valid ExportMetricsServiceRequest.
+        status=000; cause=unknown
+        if [ -s "$TOKEN_FILE" ]; then
+          read -r tok _ < "$TOKEN_FILE" || true
+          umask 077
+          printf 'Authorization: %s %s\n' "$TOKEN_SCHEME" "$tok" > "$H"
+          unset tok
+          status=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 $cacert \
+            -H @"$H" -H 'Content-Type: application/json' \
+            --data '{"resourceMetrics":[]}' "${BLUEBOX_ENDPOINT%/}/v1/metrics" 2>/tmp/curl.err)
+          rc=$?
+          rm -f "$H"
+          # A received HTTP status wins over a late transport error.
+          case "$status" in
+            2??) cause=ok ;;
+            401) cause=unauthorized ;;
+            403) cause=forbidden ;;
+            407) cause=proxy ;;
+            000|"") case "$rc" in
+                 6) cause=dns ;;
+                 28) cause=timeout ;;
+                 35|51|53|54|58|59|60|64|66|77|80|82|83|90|91) cause=tls ;;
+                 5|97) cause=proxy ;;
+                 7|52|56) if [ -n "${HTTPS_PROXY:-}" ]; then cause=proxy; else cause=unknown; fi ;;
+                 *) cause=unknown ;;
+               esac ;;
+            *) cause=unknown ;;
+          esac
+        fi
+        [ -z "$status" ] && status=000
+
+        # Counts from the API server: list with limit=1 and read remainingItemCount.
+        count() {
+          printf 'Authorization: Bearer %s\n' "$(cat "$SA/token")" > /tmp/sa-headers
+          body=$(curl -s --noproxy '*' --max-time 10 --cacert "$SA/ca.crt" -H @/tmp/sa-headers \
+            "${KUBE_API:-https://kubernetes.default.svc}$1?limit=1" 2>/dev/null)
+          rm -f /tmp/sa-headers
+          rem=$(printf '%s' "$body" | sed -n 's/.*"remainingItemCount":\([0-9][0-9]*\).*/\1/p')
+          if [ -n "$rem" ]; then echo $((rem + 1))
+          elif printf '%s' "$body" | grep -q '"items":\[\]'; then echo 0
+          elif printf '%s' "$body" | grep -q '"items":\[{'; then echo 1
+          else echo unknown; fi
+        }
+
+        ready=false
+        [ "$cause" = ok ] && [ -n "${K8S_CLUSTER_UID:-}" ] && ready=true
+        echo "otlp_status=$status"
+        echo "cause=$cause"
+        echo "ready=$ready"
+        echo "cluster_uid=${K8S_CLUSTER_UID:-}"
+        echo "nodes=$(count /api/v1/nodes)"
+        echo "namespaces=$(count /api/v1/namespaces)"
+        echo "pods=$(count /api/v1/pods)"
+        echo "collector_version=$COLLECTOR_VERSION"
+        [ "$ready" = true ]

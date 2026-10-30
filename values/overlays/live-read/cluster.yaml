@@ -1,0 +1,266 @@
+# Live read overlay (experiment, behind a Bluebox feature flag), cluster
+# release. Adds read-only live cluster access for the Bluebox agent (C2):
+#
+#   Function Executor --(EdgeConnect, outbound 443)--> EdgeConnect pod
+#     -> k8s-mcp-<uid8>.bluebox.internal:8080 (hostAliases -> 127.0.0.1)
+#     -> redactor sidecar (redactor/) -> kubernetes-mcp-server Service :8080
+#     -> kube-apiserver (read-only ServiceAccount)
+#
+# EdgeConnect has no host-mapping setting, so the C2 hostname resolves through
+# a pod hostAliases entry to the redactor sidecar on loopback; the redactor
+# then calls kubernetes-mcp-server in-cluster. Every tool result passes the
+# redactor before it reaches EdgeConnect.
+#
+# Prerequisites (docs/values.md "Live read"): an EdgeConnect created in the tenant
+# with host pattern k8s-mcp-<uid8>.bluebox.internal, and its OAuth client in
+# Secret `bluebox-edgeconnect` (keys client-id, client-secret).
+#
+# UNVERIFIED until the live-read spike runs: EdgeConnect runtime user and env-only
+# configuration (no edgeConnect.yaml), and the redactor image (pin TODO).
+global:
+  bluebox:
+    liveRead:
+      edgeConnectName: ""            # name of the EdgeConnect created in the tenant
+      apiEndpointHost: ""            # <env>.apps.dynatrace.com
+      oauthResource: ""              # urn:dtenvironment:<env>
+      oauthEndpoint: https://sso.dynatrace.com/sso/oauth2/token
+      edgeConnectImage: docker.io/dynatrace/edgeconnect@sha256:06dbb89f5981c2b6b191e1164432d55f426cc6f929be9d85e234451b0f95b11a  # 1.811.4
+      mcpServerImage: quay.io/containers/kubernetes_mcp_server@sha256:1da9d62ad0c008a6cadcf2718c86c2e2d18753ca1d9f1f3313068980794b24f2  # v0.0.69
+      # TODO: pin the redactor image by digest once it is published.
+      redactorImage: ghcr.io/pawelsiwek/k8s-mcp-redactor@sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+extraManifests:
+  # ---- kubernetes-mcp-server: read-only, Secrets and ConfigMaps denied ----
+  - apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: bluebox-k8s-mcp
+      namespace: '{{ .Release.Namespace }}'
+      labels: {app.kubernetes.io/part-of: bluebox-otelcol, app.kubernetes.io/component: live-read}
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata:
+      name: bluebox-k8s-mcp-read
+      labels: {app.kubernetes.io/part-of: bluebox-otelcol, app.kubernetes.io/component: live-read}
+    rules:
+      # get/list only (no watch, no write). Secrets and ConfigMaps are absent
+      # here AND denied in the server config; pods/log is the one subresource.
+      - apiGroups: [""]
+        resources: [pods, pods/log, nodes, namespaces, services, endpoints, events, persistentvolumeclaims, persistentvolumes, resourcequotas, limitranges, serviceaccounts, replicationcontrollers]
+        verbs: [get, list]
+      - apiGroups: [apps]
+        resources: [deployments, statefulsets, daemonsets, replicasets]
+        verbs: [get, list]
+      - apiGroups: [batch]
+        resources: [jobs, cronjobs]
+        verbs: [get, list]
+      - apiGroups: [autoscaling]
+        resources: [horizontalpodautoscalers]
+        verbs: [get, list]
+      - apiGroups: [networking.k8s.io]
+        resources: [ingresses, networkpolicies]
+        verbs: [get, list]
+      - apiGroups: [policy]
+        resources: [poddisruptionbudgets]
+        verbs: [get, list]
+      - apiGroups: [events.k8s.io]
+        resources: [events]
+        verbs: [get, list]
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata:
+      name: bluebox-k8s-mcp-read
+      labels: {app.kubernetes.io/part-of: bluebox-otelcol, app.kubernetes.io/component: live-read}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: bluebox-k8s-mcp-read}
+    subjects:
+      - {kind: ServiceAccount, name: bluebox-k8s-mcp, namespace: '{{ .Release.Namespace }}'}
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: bluebox-k8s-mcp-config
+      namespace: '{{ .Release.Namespace }}'
+      labels: {app.kubernetes.io/part-of: bluebox-otelcol, app.kubernetes.io/component: live-read}
+    data:
+      config.toml: |
+        port = "8080"
+        read_only = true
+        disable_destructive = true
+        stateless = true
+        cluster_provider_strategy = "in-cluster"
+        toolsets = ["core"]
+        list_output = "yaml"
+        max_result_bytes = 1048576
+
+        [[denied_resources]]
+        group = ""
+        version = "v1"
+        kind = "Secret"
+
+        [[denied_resources]]
+        group = ""
+        version = "v1"
+        kind = "ConfigMap"
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: bluebox-k8s-mcp
+      namespace: '{{ .Release.Namespace }}'
+      labels: {app.kubernetes.io/part-of: bluebox-otelcol, app.kubernetes.io/component: live-read, app.kubernetes.io/name: bluebox-k8s-mcp}
+    spec:
+      replicas: 1
+      selector:
+        matchLabels: {app.kubernetes.io/name: bluebox-k8s-mcp}
+      template:
+        metadata:
+          labels: {app.kubernetes.io/part-of: bluebox-otelcol, app.kubernetes.io/name: bluebox-k8s-mcp}
+        spec:
+          serviceAccountName: bluebox-k8s-mcp
+          automountServiceAccountToken: true
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 0
+            seccompProfile: {type: RuntimeDefault}
+          containers:
+            - name: kubernetes-mcp-server
+              image: '{{ .Values.global.bluebox.liveRead.mcpServerImage }}'
+              args: [--config, /etc/kubernetes-mcp-server/config.toml]
+              ports:
+                - {name: mcp, containerPort: 8080, protocol: TCP}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: [ALL]}
+                seccompProfile: {type: RuntimeDefault}
+              resources:
+                requests: {cpu: 50m, memory: 64Mi}
+                limits: {memory: 256Mi}
+              volumeMounts:
+                - {name: config, mountPath: /etc/kubernetes-mcp-server, readOnly: true}
+          volumes:
+            - name: config
+              configMap: {name: bluebox-k8s-mcp-config}
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: bluebox-k8s-mcp
+      namespace: '{{ .Release.Namespace }}'
+      labels: {app.kubernetes.io/part-of: bluebox-otelcol, app.kubernetes.io/component: live-read}
+    spec:
+      type: ClusterIP
+      selector: {app.kubernetes.io/name: bluebox-k8s-mcp}
+      ports:
+        - {name: mcp, port: 8080, targetPort: mcp, protocol: TCP}
+  # Only the EdgeConnect pods may reach the MCP server.
+  - apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: bluebox-k8s-mcp
+      namespace: '{{ .Release.Namespace }}'
+    spec:
+      podSelector:
+        matchLabels: {app.kubernetes.io/name: bluebox-k8s-mcp}
+      policyTypes: [Ingress]
+      ingress:
+        - from:
+            - podSelector:
+                matchLabels: {app.kubernetes.io/name: bluebox-edgeconnect}
+          ports:
+            - {port: 8080, protocol: TCP}
+
+  # ---- EdgeConnect + redactor sidecar: 2 replicas, PDB, outbound 443 only ----
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: bluebox-edgeconnect
+      namespace: '{{ .Release.Namespace }}'
+      labels: {app.kubernetes.io/part-of: bluebox-otelcol, app.kubernetes.io/component: live-read, app.kubernetes.io/name: bluebox-edgeconnect}
+    spec:
+      replicas: 2
+      selector:
+        matchLabels: {app.kubernetes.io/name: bluebox-edgeconnect}
+      template:
+        metadata:
+          labels: {app.kubernetes.io/part-of: bluebox-otelcol, app.kubernetes.io/name: bluebox-edgeconnect}
+        spec:
+          automountServiceAccountToken: false
+          # C2 host k8s-mcp-<uid8>.bluebox.internal -> redactor sidecar on loopback.
+          hostAliases:
+            - ip: 127.0.0.1
+              hostnames:
+                - 'k8s-mcp-{{ substr 0 8 (.Values.global.bluebox.clusterUid | default (dig "metadata" "uid" "" (lookup "v1" "Namespace" "" "kube-system")) | replace "-" "" | required "global.bluebox.clusterUid_is_required") }}.bluebox.internal'
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 0
+            seccompProfile: {type: RuntimeDefault}
+          topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: kubernetes.io/hostname
+              whenUnsatisfiable: ScheduleAnyway
+              labelSelector:
+                matchLabels: {app.kubernetes.io/name: bluebox-edgeconnect}
+          containers:
+            - name: edgeconnect
+              image: '{{ .Values.global.bluebox.liveRead.edgeConnectImage }}'
+              env:
+                - {name: EDGE_CONNECT_NAME, value: '{{ .Values.global.bluebox.liveRead.edgeConnectName }}'}
+                - {name: EDGE_CONNECT_API_ENDPOINT_HOST, value: '{{ .Values.global.bluebox.liveRead.apiEndpointHost }}'}
+                - {name: EDGE_CONNECT_OAUTH__ENDPOINT, value: '{{ .Values.global.bluebox.liveRead.oauthEndpoint }}'}
+                - {name: EDGE_CONNECT_OAUTH__RESOURCE, value: '{{ .Values.global.bluebox.liveRead.oauthResource }}'}
+                - name: EDGE_CONNECT_OAUTH__CLIENT_ID
+                  valueFrom: {secretKeyRef: {name: bluebox-edgeconnect, key: client-id}}
+                - name: EDGE_CONNECT_OAUTH__CLIENT_SECRET
+                  valueFrom: {secretKeyRef: {name: bluebox-edgeconnect, key: client-secret}}
+                # Belt and braces with the tenant-side host pattern.
+                - {name: EDGE_CONNECT_RESTRICT_HOSTS_TO, value: '*.bluebox.internal'}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: [ALL]}
+                seccompProfile: {type: RuntimeDefault}
+              resources:
+                requests: {cpu: 50m, memory: 64Mi}
+                limits: {memory: 256Mi}
+            - name: redactor
+              image: '{{ .Values.global.bluebox.liveRead.redactorImage }}'
+              args: [--listen, 127.0.0.1:8080, --upstream, 'http://bluebox-k8s-mcp.{{ .Release.Namespace }}.svc:8080']
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: [ALL]}
+                seccompProfile: {type: RuntimeDefault}
+              resources:
+                requests: {cpu: 20m, memory: 32Mi}
+                limits: {memory: 128Mi}
+  - apiVersion: policy/v1
+    kind: PodDisruptionBudget
+    metadata:
+      name: bluebox-edgeconnect
+      namespace: '{{ .Release.Namespace }}'
+    spec:
+      minAvailable: 1
+      selector:
+        matchLabels: {app.kubernetes.io/name: bluebox-edgeconnect}
+  # Egress: 443 to anywhere (Dynatrace platform), DNS, and the MCP server only.
+  - apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: bluebox-edgeconnect
+      namespace: '{{ .Release.Namespace }}'
+    spec:
+      podSelector:
+        matchLabels: {app.kubernetes.io/name: bluebox-edgeconnect}
+      policyTypes: [Ingress, Egress]
+      ingress: []
+      egress:
+        - ports:
+            - {port: 443, protocol: TCP}
+        - ports:
+            - {port: 53, protocol: UDP}
+            - {port: 53, protocol: TCP}
+        - to:
+            - podSelector:
+                matchLabels: {app.kubernetes.io/name: bluebox-k8s-mcp}
+          ports:
+            - {port: 8080, protocol: TCP}

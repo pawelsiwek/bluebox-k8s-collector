@@ -1,0 +1,326 @@
+# Release `bluebox-otelcol-cluster`: Deployment, 2 replicas + PDB.
+# k8s_cluster metrics, k8s_events, and the k8s_objects topology feed with
+# in-cluster redaction. All three receivers sit behind one k8s_leader_elector,
+# so exactly one replica collects at a time (no duplicate events/metrics).
+# Layer on top of common.yaml.
+
+mode: deployment
+fullnameOverride: bluebox-otelcol-cluster
+
+# The three components only the Bluebox image has are defined here, as extra
+# inline config sources, not under `config:`. Helm cannot delete a key another
+# values file added, so overlays/dynatrace-image/cluster.yaml drops them by
+# replacing this list (and the pipelines that use them). The chart renders args
+# unquoted, so each value carries its own single quotes.
+#   groupbyattrs/pod      one ResourceLogs per pod before k8s_attributes (namespace-batch bug)
+#   dtk8seventsprocessor  per-entity / per-cluster event throttle, OOM-kill inference
+#   dtk8stopology         K8S_CLUSTER record per pull, CONTAINER fan-out with k8s.container.image;
+#                         reads the pod map, its CONTAINER records copy identity + image only
+command:
+  name: bluebox-otelcol
+  extraArgs:
+    - --feature-gates=processor.k8sattributes.EmitV1K8sConventions,processor.k8sattributes.DontEmitV0K8sConventions
+    - "'--config=yaml:processors::groupbyattrs/pod: {\"keys\": [\"k8s.pod.uid\"]}'"
+    - "'--config=yaml:processors::dtk8seventsprocessor: {\"cluster_name\": \"${env:K8S_CLUSTER_NAME}\", \"cluster_uid\": \"${env:K8S_CLUSTER_UID}\", \"max_events_per_entity_per_hour\": 1000, \"max_events_per_cluster_per_hour\": 10000}'"
+    - "'--config=yaml:processors::dtk8stopology: {\"cluster_name\": \"${env:K8S_CLUSTER_NAME}\", \"cluster_uid\": \"${env:K8S_CLUSTER_UID}\"}'"
+
+replicaCount: 2
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: opentelemetry-collector
+        app.kubernetes.io/instance: bluebox-otelcol-cluster
+
+clusterRole:
+  create: true
+  rules:
+    # Read-only. Secrets and ConfigMaps are not listed; no nodes/proxy.
+    - apiGroups: [""]
+      resources: [events, namespaces, namespaces/status, nodes, nodes/spec, pods, pods/status, replicationcontrollers, replicationcontrollers/status, resourcequotas, services]
+      verbs: [get, list, watch]
+    - apiGroups: [apps]
+      resources: [daemonsets, deployments, replicasets, statefulsets]
+      verbs: [get, list, watch]
+    - apiGroups: [batch]
+      resources: [jobs, cronjobs]
+      verbs: [get, list, watch]
+    - apiGroups: [autoscaling]
+      resources: [horizontalpodautoscalers]
+      verbs: [get, list, watch]
+    - apiGroups: [events.k8s.io]
+      resources: [events]
+      verbs: [get, list, watch]
+
+config:
+  extensions:
+    k8s_leader_elector/cluster:
+      auth_type: serviceAccount
+      lease_name: bluebox-otelcol-cluster
+      lease_namespace: ${env:OTEL_K8S_NAMESPACE}
+  receivers:
+    otlp: null
+    k8s_cluster:
+      auth_type: serviceAccount
+      k8s_leader_elector: k8s_leader_elector/cluster
+      collection_interval: 60s
+      node_conditions_to_report: [Ready, MemoryPressure, DiskPressure, PIDPressure]
+      allocatable_types_to_report: [cpu, memory, pods]
+      metrics:
+        k8s.node.condition:
+          enabled: true
+        k8s.container.status.reason:
+          enabled: true
+        k8s.pod.status_reason:
+          enabled: true
+    k8s_events:
+      auth_type: serviceAccount
+      k8s_leader_elector: k8s_leader_elector/cluster
+    # Pod MODIFIED watch for OOM-kill inference (dtk8seventsprocessor). These
+    # records carry raw pod bodies and never leave the collector:
+    # dtk8seventsprocessor emits only new KUBERNETES_INFERRED_EVENT records, and
+    # filter/no_raw_objects drops anything from k8s_objects in logs/events.
+    k8s_objects/pod_watch:
+      auth_type: serviceAccount
+      k8s_leader_elector: k8s_leader_elector/cluster
+      objects:
+        - name: pods
+          mode: watch
+          exclude_watch_type: [ADDED, DELETED]
+    # Topology feed (pull, 120s). Kinds match the topology extension's
+    # pipeline; pod bodies here are redacted before anything is exported.
+    k8s_objects/topology:
+      auth_type: serviceAccount
+      k8s_leader_elector: k8s_leader_elector/cluster
+      objects:
+        - {name: namespaces, mode: pull, interval: 120s}
+        - {name: nodes, mode: pull, interval: 120s}
+        - {name: pods, mode: pull, interval: 120s}
+        - {name: services, mode: pull, interval: 120s}
+        - {name: deployments, group: apps, mode: pull, interval: 120s}
+        - {name: statefulsets, group: apps, mode: pull, interval: 120s}
+        - {name: daemonsets, group: apps, mode: pull, interval: 120s}
+        - {name: replicasets, group: apps, mode: pull, interval: 120s}
+  processors:
+    k8s_attributes:
+      auth_type: serviceAccount
+      passthrough: false
+      extract:
+        metadata:
+          - k8s.deployment.name
+          - k8s.statefulset.name
+          - k8s.daemonset.name
+          - k8s.replicaset.name
+          - k8s.job.name
+          - k8s.cronjob.name
+          - k8s.node.name
+        labels: &node_cost_labels
+          - {tag_name: host.type, key: node.kubernetes.io/instance-type, from: node}
+          - {tag_name: cloud.region, key: topology.kubernetes.io/region, from: node}
+          - {tag_name: cloud.availability_zone, key: topology.kubernetes.io/zone, from: node}
+      pod_association:
+        - sources:
+            - from: resource_attribute
+              name: k8s.pod.uid
+
+    # C1: events carry event.domain=k8s. event.provider and the
+    # dt.kubernetes.event.* keys feed dtk8seventsprocessor's throttle and the
+    # topology extension's KUBERNETES_EVENT handling. Only k8s_events records
+    # (no k8s.resource.name) are mapped; pod watch records are not events.
+    transform/events:
+      error_mode: ignore
+      log_statements:
+        - context: log
+          statements:
+            - set(attributes["event.domain"], "k8s") where attributes["k8s.resource.name"] == nil
+            - set(attributes["event.provider"], "KUBERNETES_EVENT") where attributes["k8s.resource.name"] == nil
+            - set(attributes["dt.kubernetes.event.reason"], attributes["k8s.event.reason"]) where attributes["k8s.resource.name"] == nil and attributes["k8s.event.reason"] != nil
+            - set(attributes["dt.kubernetes.event.involved_object.kind"], resource.attributes["k8s.object.kind"]) where attributes["k8s.resource.name"] == nil and resource.attributes["k8s.object.kind"] != nil
+            - set(attributes["dt.kubernetes.event.involved_object.name"], resource.attributes["k8s.object.name"]) where attributes["k8s.resource.name"] == nil and resource.attributes["k8s.object.name"] != nil
+
+    transform/inferred_events:
+      error_mode: ignore
+      log_statements:
+        - context: log
+          statements:
+            - set(attributes["event.domain"], "k8s") where attributes["event.provider"] == "KUBERNETES_INFERRED_EVENT"
+
+    # Fail closed: nothing that came from a k8s_objects receiver leaves logs/events.
+    filter/no_raw_objects:
+      error_mode: ignore
+      logs:
+        log_record:
+          - attributes["k8s.resource.name"] != nil
+
+    # In-cluster redaction of the topology feed (C1). Runs FIRST on the raw
+    # object, before anything is copied out of the body:
+    #   1. on the map: drop the last-applied-configuration annotation, and
+    #      replace every annotation value that looks like JSON ({... or [...)
+    #      with "<redacted>" (pod and pod-template annotations). Embedded JSON
+    #      is escaped one level deeper, out of reach of the patterns in step 2;
+    #   2. serialise to JSON and rewrite with RE2 patterns:
+    #      A every "value" scalar -> "<redacted>" (env[].value,
+    #        httpGet.httpHeaders[].value; also toleration values: accepted
+    #        over-redaction, fail closed)
+    #      B every "command"/"args" array -> ["<redacted>"] (containers,
+    #        initContainers, ephemeralContainers, exec probes, lifecycle hooks)
+    #      C any key containing token|password|passwd|secret|apikey|api_key|
+    #        api-key|credential|private_key|privatekey (case-insensitive) with a
+    #        scalar value -> "<redacted>"
+    #   3. the redacted string becomes attributes["k8s.object"] and, in
+    #      transform/topology, the body; the original map never leaves.
+    #   env[].valueFrom references are objects, so A and C leave them intact.
+    # error_mode propagate: a failed statement drops the batch (fail closed).
+    # Proven by bluebox/tests/redaction_test.sh against this rendered block.
+    transform/redact:
+      error_mode: propagate
+      log_statements:
+        - context: log
+          statements:
+            - delete_key(body["metadata"]["annotations"], "kubectl.kubernetes.io/last-applied-configuration") where IsMap(body["metadata"]["annotations"])
+            - replace_all_patterns(body["metadata"]["annotations"], "value", "(?s)^\\s*[\\[{].*$", "<redacted>") where IsMap(body["metadata"]["annotations"])
+            - replace_all_patterns(body["spec"]["template"]["metadata"]["annotations"], "value", "(?s)^\\s*[\\[{].*$", "<redacted>") where IsMap(body["spec"]["template"]["metadata"]["annotations"])
+            - set(cache["obj"], String(body))
+            - replace_pattern(cache["obj"], "\"value\"\\s*:\\s*(?:\"(?:[^\"\\\\]|\\\\.)*\"|-?[0-9][0-9.eE+-]*|true|false|null)", "\"value\":\"<redacted>\"")
+            - replace_pattern(cache["obj"], "\"(command|args)\"\\s*:\\s*\\[(?:\"(?:[^\"\\\\]|\\\\.)*\"|[^\\]\"])*\\]", "\"$${1}\":[\"<redacted>\"]")
+            - replace_pattern(cache["obj"], "\"([^\"\\\\]*(?i:token|password|passwd|secret|apikey|api_key|api-key|credential|private_key|privatekey)[^\"\\\\]*)\"\\s*:\\s*(?:\"(?:[^\"\\\\]|\\\\.)*\"|-?[0-9][0-9.eE+-]*|true|false|null)", "\"$${1}\":\"<redacted>\"")
+            - set(attributes["k8s.object"], cache["obj"])
+            - set(attributes["k8s.object.redacted"], true)
+
+    # Topology attributes the topology extension keys on (Tobias's
+    # transform/topology), reading identity fields only. Runs after redaction.
+    transform/topology:
+      error_mode: ignore
+      log_statements:
+        - context: log
+          statements:
+            - set(attributes["event.provider"], "KUBERNETES_OTEL_TOPO")
+            - set(attributes["event.kind"], "topology_node")
+            - set(attributes["k8s.cluster.name"], "${env:K8S_CLUSTER_NAME}")
+            - set(attributes["k8s.cluster.uid"], "${env:K8S_CLUSTER_UID}")
+            - set(attributes["k8s.topo.node.type"], "K8S_NAMESPACE") where attributes["k8s.resource.name"] == "namespaces"
+            - set(attributes["k8s.namespace.name"], body["metadata"]["name"]) where attributes["k8s.resource.name"] == "namespaces"
+            - set(attributes["k8s.namespace.uid"], body["metadata"]["uid"]) where attributes["k8s.resource.name"] == "namespaces"
+            - set(attributes["k8s.topo.node.type"], "K8S_NODE") where attributes["k8s.resource.name"] == "nodes"
+            - set(attributes["k8s.node.name"], body["metadata"]["name"]) where attributes["k8s.resource.name"] == "nodes"
+            - set(attributes["k8s.node.uid"], body["metadata"]["uid"]) where attributes["k8s.resource.name"] == "nodes"
+            - set(attributes["k8s.node.system_uuid"], body["status"]["nodeInfo"]["systemUUID"]) where attributes["k8s.resource.name"] == "nodes" and body["status"]["nodeInfo"]["systemUUID"] != nil
+            - set(attributes["k8s.topo.node.type"], "K8S_POD") where attributes["k8s.resource.name"] == "pods"
+            - set(attributes["k8s.pod.name"], body["metadata"]["name"]) where attributes["k8s.resource.name"] == "pods"
+            - set(attributes["k8s.pod.uid"], body["metadata"]["uid"]) where attributes["k8s.resource.name"] == "pods"
+            - set(attributes["k8s.namespace.name"], body["metadata"]["namespace"]) where attributes["k8s.resource.name"] == "pods" and body["metadata"]["namespace"] != nil
+            - set(attributes["k8s.pod.phase"], body["status"]["phase"]) where attributes["k8s.resource.name"] == "pods" and body["status"]["phase"] != nil
+            - set(attributes["k8s.node.name"], body["spec"]["nodeName"]) where attributes["k8s.resource.name"] == "pods" and body["spec"]["nodeName"] != nil
+            - set(attributes["k8s.topo.node.type"], "K8S_DEPLOYMENT") where attributes["k8s.resource.name"] == "deployments"
+            - set(attributes["k8s.deployment.name"], body["metadata"]["name"]) where attributes["k8s.resource.name"] == "deployments"
+            - set(attributes["k8s.workload.kind"], "deployment") where attributes["k8s.resource.name"] == "deployments"
+            - set(attributes["k8s.topo.node.type"], "K8S_STATEFULSET") where attributes["k8s.resource.name"] == "statefulsets"
+            - set(attributes["k8s.statefulset.name"], body["metadata"]["name"]) where attributes["k8s.resource.name"] == "statefulsets"
+            - set(attributes["k8s.workload.kind"], "statefulset") where attributes["k8s.resource.name"] == "statefulsets"
+            - set(attributes["k8s.topo.node.type"], "K8S_DAEMONSET") where attributes["k8s.resource.name"] == "daemonsets"
+            - set(attributes["k8s.daemonset.name"], body["metadata"]["name"]) where attributes["k8s.resource.name"] == "daemonsets"
+            - set(attributes["k8s.workload.kind"], "daemonset") where attributes["k8s.resource.name"] == "daemonsets"
+            - set(attributes["k8s.topo.node.type"], "K8S_REPLICASET") where attributes["k8s.resource.name"] == "replicasets"
+            - set(attributes["k8s.replicaset.name"], body["metadata"]["name"]) where attributes["k8s.resource.name"] == "replicasets"
+            - set(attributes["k8s.workload.kind"], "replicaset") where attributes["k8s.resource.name"] == "replicasets"
+            - set(attributes["k8s.topo.node.type"], "K8S_SERVICE") where attributes["k8s.resource.name"] == "services"
+            - set(attributes["k8s.service.name"], body["metadata"]["name"]) where attributes["k8s.resource.name"] == "services"
+            - set(attributes["k8s.namespace.name"], body["metadata"]["namespace"]) where attributes["k8s.resource.name"] == "services"
+            - set(attributes["k8s.namespace.name"], body["metadata"]["namespace"]) where attributes["k8s.resource.name"] == "deployments"
+            - set(attributes["k8s.namespace.name"], body["metadata"]["namespace"]) where attributes["k8s.resource.name"] == "statefulsets"
+            - set(attributes["k8s.namespace.name"], body["metadata"]["namespace"]) where attributes["k8s.resource.name"] == "daemonsets"
+            - set(attributes["k8s.namespace.name"], body["metadata"]["namespace"]) where attributes["k8s.resource.name"] == "replicasets"
+            - set(attributes["k8s.workload.name"], body["metadata"]["name"]) where attributes["k8s.resource.name"] == "deployments"
+            - set(attributes["k8s.workload.name"], body["metadata"]["name"]) where attributes["k8s.resource.name"] == "statefulsets"
+            - set(attributes["k8s.workload.name"], body["metadata"]["name"]) where attributes["k8s.resource.name"] == "daemonsets"
+            - set(attributes["k8s.workload.name"], body["metadata"]["name"]) where attributes["k8s.resource.name"] == "replicasets"
+            - set(attributes["dt.openpipeline.source"], "custom:dt-k8s-otel-topology")
+
+    # Last step of logs/topology: the raw object map is replaced by its redacted
+    # serialisation; records without one (CONTAINER, K8S_CLUSTER) get an empty body.
+    # The raw map exists only between transform/redact and here.
+    transform/finalize:
+      error_mode: propagate
+      log_statements:
+        - context: log
+          statements:
+            - set(body, "") where attributes["k8s.object"] == nil
+            - set(body, attributes["k8s.object"]) where attributes["k8s.object"] != nil
+            - set(attributes["dt.openpipeline.source"], "custom:dt-k8s-otel-topology")
+
+    transform/topology_workload:
+      error_mode: ignore
+      log_statements:
+        - context: log
+          statements:
+            - set(attributes["k8s.deployment.name"], resource.attributes["k8s.deployment.name"]) where resource.attributes["k8s.deployment.name"] != nil and attributes["k8s.deployment.name"] == nil
+            - set(attributes["k8s.statefulset.name"], resource.attributes["k8s.statefulset.name"]) where resource.attributes["k8s.statefulset.name"] != nil and attributes["k8s.statefulset.name"] == nil
+            - set(attributes["k8s.daemonset.name"], resource.attributes["k8s.daemonset.name"]) where resource.attributes["k8s.daemonset.name"] != nil and attributes["k8s.daemonset.name"] == nil
+            - set(attributes["k8s.replicaset.name"], resource.attributes["k8s.replicaset.name"]) where resource.attributes["k8s.replicaset.name"] != nil and attributes["k8s.replicaset.name"] == nil
+            - set(attributes["k8s.job.name"], resource.attributes["k8s.job.name"]) where resource.attributes["k8s.job.name"] != nil
+            - set(attributes["k8s.cronjob.name"], resource.attributes["k8s.cronjob.name"]) where resource.attributes["k8s.cronjob.name"] != nil
+            - set(attributes["k8s.workload.name"], resource.attributes["k8s.workload.name"]) where resource.attributes["k8s.workload.name"] != nil and attributes["k8s.workload.name"] == nil
+            - set(attributes["k8s.workload.kind"], resource.attributes["k8s.workload.kind"]) where resource.attributes["k8s.workload.kind"] != nil and attributes["k8s.workload.kind"] == nil
+
+    transform/openpipeline_source_metrics:
+      error_mode: ignore
+      metric_statements:
+        - context: resource
+          statements:
+            - set(attributes["dt.openpipeline.source"], "custom:dt-k8s-otel-topology")
+
+  service:
+    extensions:
+      - health_check
+      - bearertokenauth
+      - k8s_leader_elector/cluster
+    pipelines:
+      metrics:
+        receivers: [k8s_cluster]
+        processors: [memory_limiter, k8s_attributes, resource/bluebox, transform/drop_empty, transform/workload, transform/openpipeline_source_metrics, filter/allowlist, batch]
+        exporters: [otlp_http/bluebox]
+      logs/events:
+        receivers: [k8s_events, k8s_objects/pod_watch]
+        processors: [memory_limiter, transform/events, dtk8seventsprocessor, transform/inferred_events, filter/no_raw_objects, resource/bluebox, transform/drop_empty, batch]
+        exporters: [otlp_http/bluebox]
+      logs/topology:
+        receivers: [k8s_objects/topology]
+        processors: [memory_limiter, transform/redact, transform/topology, groupbyattrs/pod, k8s_attributes, transform/workload, transform/topology_workload, dtk8stopology, transform/finalize, resource/bluebox, transform/drop_empty, batch]
+        exporters: [otlp_http/bluebox]
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 768Mi
+
+extraManifests:
+  # Leader election lease, namespaced (least privilege; not a ClusterRole rule).
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata:
+      name: bluebox-otelcol-cluster-leases
+      namespace: '{{ .Release.Namespace }}'
+    rules:
+      - apiGroups: [coordination.k8s.io]
+        resources: [leases]
+        verbs: [get, list, watch, create, update, patch]
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata:
+      name: bluebox-otelcol-cluster-leases
+      namespace: '{{ .Release.Namespace }}'
+    roleRef:
+      apiGroup: rbac.authorization.k8s.io
+      kind: Role
+      name: bluebox-otelcol-cluster-leases
+    subjects:
+      - kind: ServiceAccount
+        name: bluebox-otelcol-cluster
+        namespace: '{{ .Release.Namespace }}'

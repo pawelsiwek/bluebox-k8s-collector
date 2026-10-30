@@ -1,0 +1,1 @@
+{"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": "demo", "uid": "bbbbbbbb-0000-0000-0000-000000000002", "labels": {"app": "demo"}, "annotations": {"kubectl.kubernetes.io/last-applied-configuration": "{\"spec\":{\"x\":\"LASTAPPLIED_OTHER_SECRET_16\"}}"}}, "status": {"phase": "Active"}}

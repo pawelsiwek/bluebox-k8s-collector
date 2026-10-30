@@ -1,0 +1,75 @@
+# Stock Dynatrace image instead of the Bluebox image, cluster release.
+# Layer right after values/cluster.yaml. The stock image lacks dtk8stopology,
+# dtk8seventsprocessor, alertingengine and groupbyattrs, so:
+#   - K8S_CLUSTER comes from a second k8s_objects pull of the kube-system
+#     Namespace, turned into a cluster record with OTTL (logs/cluster);
+#   - pod workload names come from ownerReferences via OTTL instead of
+#     groupbyattrs + k8s_attributes (which would hit the namespace-batch bug);
+#   - no CONTAINER fan-out, no OOM inference, no event throttle.
+image:
+  repository: public.ecr.aws/dynatrace/dynatrace-otel-collector
+  tag: "0.58.1"
+  digest: sha256:29a09e6a19daae245dce5b9adba42055ce3f34655fbd41b9b62d2e1a806c5589
+command:
+  name: dynatrace-otel-collector
+  # Replaces cluster.yaml's list: drops the Bluebox-only inline component configs.
+  extraArgs:
+    - --feature-gates=processor.k8sattributes.EmitV1K8sConventions,processor.k8sattributes.DontEmitV0K8sConventions
+
+config:
+  receivers:
+    k8s_objects/cluster:
+      auth_type: serviceAccount
+      k8s_leader_elector: k8s_leader_elector/cluster
+      objects:
+        - name: namespaces
+          mode: pull
+          interval: 120s
+          field_selector: metadata.name=kube-system
+  processors:
+    # K8S_CLUSTER record from the kube-system Namespace (its UID is the cluster UID).
+    transform/cluster_record:
+      error_mode: propagate
+      log_statements:
+        - context: log
+          statements:
+            - set(attributes["event.provider"], "KUBERNETES_OTEL_TOPO")
+            - set(attributes["event.kind"], "topology_node")
+            - set(attributes["k8s.topo.node.type"], "K8S_CLUSTER")
+            - set(attributes["k8s.cluster.name"], "${env:K8S_CLUSTER_NAME}")
+            - set(attributes["k8s.cluster.uid"], "${env:K8S_CLUSTER_UID}")
+            - set(attributes["dt.openpipeline.source"], "custom:dt-k8s-otel-topology")
+            - set(body, "")
+    # Pod -> workload from ownerReferences (ReplicaSet -> Deployment via pod-template-hash).
+    transform/workload_ownerref:
+      error_mode: ignore
+      log_statements:
+        - context: log
+          statements:
+            - set(cache["owner_kind"], body["metadata"]["ownerReferences"][0]["kind"]) where attributes["k8s.resource.name"] == "pods" and IsList(body["metadata"]["ownerReferences"])
+            - set(cache["owner_name"], body["metadata"]["ownerReferences"][0]["name"]) where attributes["k8s.resource.name"] == "pods" and IsList(body["metadata"]["ownerReferences"])
+            - set(attributes["k8s.replicaset.name"], cache["owner_name"]) where cache["owner_kind"] == "ReplicaSet"
+            - set(attributes["k8s.workload.name"], TrimSuffix(cache["owner_name"], Concat(["-", body["metadata"]["labels"]["pod-template-hash"]], ""))) where cache["owner_kind"] == "ReplicaSet" and body["metadata"]["labels"]["pod-template-hash"] != nil
+            - set(attributes["k8s.deployment.name"], attributes["k8s.workload.name"]) where cache["owner_kind"] == "ReplicaSet" and attributes["k8s.workload.name"] != nil
+            - set(attributes["k8s.workload.kind"], "deployment") where cache["owner_kind"] == "ReplicaSet" and attributes["k8s.workload.name"] != nil
+            - set(attributes["k8s.workload.name"], cache["owner_name"]) where cache["owner_kind"] == "ReplicaSet" and attributes["k8s.workload.name"] == nil
+            - set(attributes["k8s.workload.kind"], "replicaset") where cache["owner_kind"] == "ReplicaSet" and attributes["k8s.workload.kind"] == nil
+            - set(attributes["k8s.statefulset.name"], cache["owner_name"]) where cache["owner_kind"] == "StatefulSet"
+            - set(attributes["k8s.daemonset.name"], cache["owner_name"]) where cache["owner_kind"] == "DaemonSet"
+            - set(attributes["k8s.job.name"], cache["owner_name"]) where cache["owner_kind"] == "Job"
+            - set(attributes["k8s.workload.name"], cache["owner_name"]) where cache["owner_kind"] != nil and cache["owner_kind"] != "ReplicaSet"
+            - set(attributes["k8s.workload.kind"], ConvertCase(cache["owner_kind"], "lower")) where cache["owner_kind"] != nil and cache["owner_kind"] != "ReplicaSet"
+  service:
+    pipelines:
+      logs/events:
+        receivers: [k8s_events]
+        processors: [memory_limiter, transform/events, filter/no_raw_objects, resource/bluebox, transform/drop_empty, batch]
+        exporters: [otlp_http/bluebox]
+      logs/topology:
+        receivers: [k8s_objects/topology]
+        processors: [memory_limiter, transform/redact, transform/topology, transform/workload_ownerref, transform/finalize, resource/bluebox, transform/drop_empty, batch]
+        exporters: [otlp_http/bluebox]
+      logs/cluster:
+        receivers: [k8s_objects/cluster]
+        processors: [memory_limiter, transform/cluster_record, resource/bluebox, transform/drop_empty, batch]
+        exporters: [otlp_http/bluebox]

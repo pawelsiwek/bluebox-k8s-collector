@@ -1,0 +1,18 @@
+# Threshold alerts from the alertingengine connector (Bluebox image only).
+# Off by default: Davis anomaly detection on the exported metrics covers these.
+# Layer after values/cluster.yaml (never with dynatrace-image).
+config:
+  connectors:
+    alertingengine:
+      window_size_seconds: 60
+      grace_period_seconds: 0
+  service:
+    pipelines:
+      metrics:
+        receivers: [k8s_cluster]
+        processors: [memory_limiter, k8s_attributes, resource/bluebox, transform/drop_empty, transform/workload, transform/openpipeline_source_metrics, filter/allowlist, batch]
+        exporters: [otlp_http/bluebox, alertingengine]
+      logs/alerts:
+        receivers: [alertingengine]
+        processors: [memory_limiter, resource/bluebox, transform/drop_empty, batch]
+        exporters: [otlp_http/bluebox]
