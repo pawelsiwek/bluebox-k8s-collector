@@ -1,0 +1,214 @@
+# CI: Go tests (collector components, redactor), topology tests, collector and
+# redactor image build + Trivy gate, the values test suite against the built
+# collector image, and a kind e2e for both image variants.
+# What each values test proves: docs/values.md § "Tests".
+# Image build and scan: collector/README.md § "Image".
+# release.yml calls this workflow before it publishes anything.
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow_ref }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  BLUEBOX_IMAGE: localhost/bluebox-otelcol:dev
+
+jobs:
+  collector-go:
+    name: collector go test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: collector/go.mod
+          cache: false  # also runs from release.yml: no shared cache (cache poisoning)
+      - name: Vet, race tests, gofmt
+        run: make -C collector test
+
+  redactor-go:
+    name: redactor go test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: redactor/go.mod
+          cache: false  # stdlib-only module: no go.sum to key a cache on
+      - name: Vet
+        run: GOWORK=off go vet ./...
+        working-directory: redactor
+      - name: Lint (golangci-lint defaults)
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a  # v9.3.0
+        env:
+          GOWORK: "off"
+        with:
+          version: v2.12.2
+          install-mode: goinstall
+          working-directory: redactor
+          args: --timeout 5m
+      - name: Test (race)
+        run: CGO_ENABLED=1 GOWORK=off go test -race ./...
+        working-directory: redactor
+
+  topology:
+    name: topology tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: false
+      - run: make test-topology
+
+  collector-image:
+    name: collector image (build + scan)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5  # v4.1.0
+      - name: Build linux/amd64 (loaded for scan, validate and the values tests)
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf  # v7.2.0
+        with:
+          context: collector
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: ${{ env.BLUEBOX_IMAGE }}
+          build-args: REVISION=${{ github.sha }}
+      - name: Vulnerability scan (blocking)
+        run: scripts/ci/image-scan-gate.sh "$BLUEBOX_IMAGE" collector/image-scan-allowlist.json
+      - name: Validate a smoke config with the built binary
+        run: docker run --rm -v "$PWD/collector/testdata:/cfg:ro" "$BLUEBOX_IMAGE" validate --config=/cfg/smoke.yaml
+      - name: Save the image for the values tests and the kind e2e
+        run: docker save "$BLUEBOX_IMAGE" | gzip -1 > "$RUNNER_TEMP/bluebox-otelcol.tar.gz"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: bluebox-otelcol-image
+          path: ${{ runner.temp }}/bluebox-otelcol.tar.gz
+          retention-days: 1
+
+  redactor-image:
+    name: redactor image (build + scan)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5  # v4.1.0
+      - name: Build linux/amd64 (loaded for scan)
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf  # v7.2.0
+        with:
+          context: redactor
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: localhost/k8s-mcp-redactor:dev
+          build-args: REVISION=${{ github.sha }}
+      - name: Vulnerability scan (blocking)
+        run: scripts/ci/image-scan-gate.sh localhost/k8s-mcp-redactor:dev redactor/image-scan-allowlist.json
+      - name: Cross-build linux/arm64
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf  # v7.2.0
+        with:
+          context: redactor
+          platforms: linux/arm64
+          push: false
+          build-args: REVISION=${{ github.sha }}
+
+  values:
+    name: values tests
+    needs: collector-image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CONTAINER_ENGINE: docker
+      # Linux runners reach the host from containers through the docker bridge.
+      HOST_ALIAS: host.docker.internal
+      CONTAINER_RUN_ARGS: --add-host=host.docker.internal:host-gateway
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2  # v5.0.0
+        with:
+          version: v3.16.4
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: false
+      - name: Check yq (preinstalled mikefarah/yq v4 on GitHub-hosted Ubuntu)
+        run: yq --version | grep -q 'version v4'
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          name: bluebox-otelcol-image
+          path: ${{ runner.temp }}
+      - name: Load the collector image
+        run: gunzip -c "$RUNNER_TEMP/bluebox-otelcol.tar.gz" | docker load
+      - name: Values tests (both image variants)
+        run: make test-values
+
+  kind-e2e:
+    name: kind e2e (${{ matrix.variant }})
+    needs: [collector-image, values]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [bluebox, dynatrace]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2  # v5.0.0
+        with:
+          version: v3.16.4
+      - uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa  # v1.15.1
+        with:
+          cluster_name: bluebox-e2e
+          version: v0.27.0
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        if: matrix.variant == 'bluebox'
+        with:
+          name: bluebox-otelcol-image
+          path: ${{ runner.temp }}
+      - name: Load the collector image
+        if: matrix.variant == 'bluebox'
+        run: gunzip -c "$RUNNER_TEMP/bluebox-otelcol.tar.gz" | docker load
+      - name: kind e2e
+        env:
+          KIND_CLUSTER: bluebox-e2e
+          VARIANT: ${{ matrix.variant }}
+        # Without BLUEBOX_IMAGE the script runs the stock Dynatrace image.
+        run: |
+          if [ "$VARIANT" = dynatrace ]; then unset BLUEBOX_IMAGE; fi
+          tests/e2e/kind_e2e.sh
+      - name: Diagnostics
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide
+          kubectl -n bluebox-otelcol logs -l app.kubernetes.io/instance=bluebox-otelcol-cluster --tail=100 || true
+          kubectl -n bluebox-otelcol logs -l app.kubernetes.io/instance=bluebox-otelcol-agent --tail=100 || true

@@ -1,0 +1,37 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "semanticCommits": "enabled",
+  "labels": ["dependencies"],
+  "schedule": ["before 9am on Monday"],
+  "minimumReleaseAge": "3 days",
+  "vulnerabilityAlerts": {
+    "schedule": ["at any time"],
+    "minimumReleaseAge": null
+  },
+  "prConcurrentLimit": 5,
+  "ignorePaths": ["values/**", "tests/**"],
+  "packageRules": [
+    {
+      "groupName": "collector",
+      "matchManagers": ["gomod", "dockerfile"],
+      "matchFileNames": ["collector/**"]
+    },
+    {
+      "description": "collector/ pins the OpenTelemetry Collector release of the vendored Dynatrace distribution manifest; bump them together by hand (collector/README.md § \"Bumping\").",
+      "matchManagers": ["gomod"],
+      "matchFileNames": ["collector/**"],
+      "matchPackageNames": ["go.opentelemetry.io/collector/**", "github.com/open-telemetry/opentelemetry-collector-contrib/**"],
+      "enabled": false
+    },
+    {
+      "groupName": "redactor",
+      "matchManagers": ["gomod", "dockerfile"],
+      "matchFileNames": ["redactor/**"]
+    },
+    {
+      "groupName": "github-actions",
+      "matchManagers": ["github-actions"]
+    }
+  ]
+}

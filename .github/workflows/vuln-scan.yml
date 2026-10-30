@@ -1,0 +1,74 @@
+# Daily vulnerability scan: govulncheck over the whole generated collector
+# distribution and over the redactor, and the Trivy gate over the images of the
+# latest GitHub Release. A finding fails the run; fix it or allowlist it
+# (collector/README.md § "Security overrides", scripts/ci/image-scan-gate.sh).
+
+name: vuln-scan
+
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    name: govulncheck (${{ matrix.component }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: collector
+            gomod: collector/go.mod
+            run: make -C collector govulncheck
+          - component: redactor
+            gomod: redactor/go.mod
+            run: cd redactor && go run golang.org/x/vuln/cmd/govulncheck@v1.3.0 ./...
+    env:
+      GOWORK: 'off'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version-file: ${{ matrix.gomod }}
+          cache: false
+      - name: govulncheck
+        run: ${{ matrix.run }}
+
+  image:
+    name: Trivy (${{ matrix.image }}, latest release)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: bluebox-otelcol
+            allowlist: collector/image-scan-allowlist.json
+          - image: k8s-mcp-redactor
+            allowlist: redactor/image-scan-allowlist.json
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Scan the latest released image
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NAME: ${{ matrix.image }}
+          ALLOWLIST: ${{ matrix.allowlist }}
+        run: |
+          tag="$(gh release view --repo "$REPO" --json tagName --jq .tagName 2>/dev/null || true)"
+          if [ -z "$tag" ]; then
+            echo "::notice::no GitHub Release yet; nothing to scan"
+            exit 0
+          fi
+          ref="ghcr.io/pawelsiwek/$NAME:${tag#v}"
+          docker pull --quiet "$ref"
+          scripts/ci/image-scan-gate.sh "$ref" "$ALLOWLIST"

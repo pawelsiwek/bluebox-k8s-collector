@@ -1,0 +1,25 @@
+bluebox-k8s-collector
+Copyright 2026 Dynatrace LLC
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It includes work by Tobias Rauter from dt-otel-k8s-platform-monitoring
+(https://github.com/trauter/dt-otel-k8s-platform-monitoring), licensed under
+the Apache License, Version 2.0:
+
+  - collector/processor/dtk8stopology, collector/processor/dtk8seventsprocessor
+    and collector/connector/alertingengine, vendored from commit
+    72bed8b88e727b1edf5f3e33460f1bf51bf7b5e6 (2026-10-13), with the
+    modifications listed in collector/NOTICE;
+  - topology/extension/src (extension custom:dt-k8s-otel-topology 1.3.3),
+    vendored unmodified from commit afcf8c7a49c15f25f05635e4dfd4fab544e94048
+    and pinned by checksum in topology/extension/UPSTREAM.json.
+
+The values tree (values/, scripts/, tests/, install/) was first developed on a
+fork of that repository, based on commit
+e0fd52e86d59e2782c9a7096e076fb87e569bb75.
+
+The collector binary is assembled with the OpenTelemetry Collector Builder from
+the Dynatrace distribution manifest
+(https://github.com/Dynatrace/dynatrace-otel-collector, tag v0.58.1,
+Apache-2.0) and OpenTelemetry Collector components (Apache-2.0).

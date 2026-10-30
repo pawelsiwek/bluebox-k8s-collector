@@ -1,0 +1,164 @@
+# Release on tag vX.Y.Z: run CI, then build and push the multi-arch collector and
+# redactor images to GHCR (image tag X.Y.Z), gate each on Trivy before the push,
+# attach an SBOM and Sigstore build provenance, pin the values tree to the pushed
+# digests as tag values-vX.Y.Z, and create the GitHub Release.
+# Release process and the values tag: README.md § "Releasing".
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: publish ${{ matrix.image }}
+    needs: ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write       # push to ghcr.io/pawelsiwek
+      id-token: write       # Sigstore signing for attest-build-provenance
+      attestations: write   # store the provenance attestation
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - image: bluebox-otelcol
+            context: collector
+          - image: k8s-mcp-redactor
+            context: redactor
+    env:
+      IMAGE: ghcr.io/pawelsiwek/${{ matrix.image }}
+    steps:
+      - name: Check the tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          printf '%s\n' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            || { echo "::error::tag $TAG is not vX.Y.Z"; exit 1; }
+          echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5  # v4.1.0
+      - name: Build linux/amd64 for the scan
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf  # v7.2.0
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: ${{ matrix.image }}:scan
+          build-args: REVISION=${{ github.sha }}
+      - name: Trivy gate (blocking, before any push)
+        run: scripts/ci/image-scan-gate.sh "${{ matrix.image }}:scan" "${{ matrix.context }}/image-scan-allowlist.json"
+      - name: Log in to GHCR
+        env:
+          GH_TOKEN: ${{ github.token }}   # via env, never interpolated into the script
+          ACTOR: ${{ github.actor }}
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+      - name: Build and push (amd64 + arm64, SPDX SBOM attestation)
+        id: push
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf  # v7.2.0
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          sbom: true
+          provenance: false  # SLSA provenance comes from attest-build-provenance (Sigstore)
+          tags: ${{ env.IMAGE }}:${{ env.VERSION }}
+          build-args: REVISION=${{ github.sha }}
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373  # v4.1.1
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+      - name: SPDX SBOM file for the GitHub Release
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          NAME: ${{ matrix.image }}
+        run: |
+          trivy="$(scripts/ci/install-trivy.sh)"
+          mkdir -p "$RUNNER_TEMP/out"
+          "$trivy" image --quiet --format spdx-json --output "$RUNNER_TEMP/out/$NAME-$VERSION.spdx.json" "$IMAGE@$DIGEST"
+          printf '%s\n' "$DIGEST" > "$RUNNER_TEMP/out/$NAME.digest"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: release-${{ matrix.image }}
+          path: ${{ runner.temp }}/out/
+          retention-days: 7
+
+  release:
+    name: pin values + GitHub Release
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write       # push tag values-vX.Y.Z and create the GitHub Release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: true  # pushes the values tag
+      - uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2  # v5.0.0
+        with:
+          version: v3.16.4
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131  # v7.0.0
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/out
+      - name: Pin the values to the pushed digests
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          scripts/ci/pin-release.sh "$version" \
+            "$(cat "$RUNNER_TEMP/out/bluebox-otelcol.digest")" \
+            "$(cat "$RUNNER_TEMP/out/k8s-mcp-redactor.digest")"
+          make pinned schema snippet
+      - name: Commit and push tag values-${{ github.ref_name }}
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -am "chore(release): pin values to ${TAG} image digests"
+          git tag "values-${TAG}"
+          git push origin "refs/tags/values-${TAG}"
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          version="${TAG#v}"
+          c="$(cat "$RUNNER_TEMP/out/bluebox-otelcol.digest")"
+          r="$(cat "$RUNNER_TEMP/out/k8s-mcp-redactor.digest")"
+          {
+            echo "Images:"
+            echo
+            echo "- \`ghcr.io/pawelsiwek/bluebox-otelcol:${version}@${c}\`"
+            echo "- \`ghcr.io/pawelsiwek/k8s-mcp-redactor:${version}@${r}\`"
+            echo
+            echo "Values pinned to these digests: tag \`values-${TAG}\`,"
+            echo "\`https://raw.githubusercontent.com/${REPO}/values-${TAG}/values/\`."
+            echo
+            echo "Verify provenance: \`gh attestation verify oci://ghcr.io/pawelsiwek/bluebox-otelcol:${version} --repo ${REPO}\`."
+          } > "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" --repo "$REPO" --verify-tag --title "$TAG" \
+            --notes-file "$RUNNER_TEMP/notes.md" "$RUNNER_TEMP"/out/*.spdx.json
