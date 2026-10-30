@@ -45,7 +45,9 @@ The pinned distribution's `golang.org/x/net` v0.59.0 has fixable HIGH
 findings: Trivy reports CVE-2026-78669, and govulncheck reports
 GO-2026-6603, -6610, -6611, -6612 and -6617 as reachable through the
 `http2` paths of the OTLP receiver and zpages. `replaces:` forces
-`golang.org/x/net` v0.60.0. Remove each override once the pinned Dynatrace
+`golang.org/x/net` v0.60.0. The distribution's `github.com/go-jose/go-jose/v4`
+v4.1.5 (via `oidcauthextension`) has HIGH CVE-2026-116587, so `replaces:`
+forces v4.1.6. Remove each override once the pinned Dynatrace
 release carries the fix; the image-scan gate and the daily govulncheck leg
 show when an override is needed.
 

@@ -87,3 +87,4 @@ replaces:
   # Security overrides (README.md § "Security overrides"); drop each once the pinned
   # Dynatrace manifest's release carries the fix.
   - golang.org/x/net => golang.org/x/net v0.60.0  # CVE-2026-78669, GO-2026-6603/6610/6611/6612/6617 (x/net/http2), fixed in 0.60.0
+  - github.com/go-jose/go-jose/v4 => github.com/go-jose/go-jose/v4 v4.1.6  # CVE-2026-116587, fixed in 4.1.6
