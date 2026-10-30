@@ -269,10 +269,11 @@ extraManifests:
         [ -z "$status" ] && status=000
 
         # Counts from the API server: list with limit=1 and read remainingItemCount.
+        # The API server pretty-prints JSON for curl, so whitespace is removed first.
         count() {
           printf 'Authorization: Bearer %s\n' "$(cat "$SA/token")" > /tmp/sa-headers
           body=$(curl -s --noproxy '*' --max-time 10 --cacert "$SA/ca.crt" -H @/tmp/sa-headers \
-            "${KUBE_API:-https://kubernetes.default.svc}$1?limit=1" 2>/dev/null)
+            "${KUBE_API:-https://kubernetes.default.svc}$1?limit=1" 2>/dev/null | tr -d '[:space:]')
           rm -f /tmp/sa-headers
           rem=$(printf '%s' "$body" | sed -n 's/.*"remainingItemCount":\([0-9][0-9]*\).*/\1/p')
           if [ -n "$rem" ]; then echo $((rem + 1))

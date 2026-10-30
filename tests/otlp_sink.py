@@ -2,7 +2,8 @@
 {"path", "authorization", "body"} where body is the decoded JSON request.
 Usage: otlp_sink.py <port> <certfile> <keyfile> <outfile> [post_status]
 GET /api/v1/{nodes,namespaces,pods} answer like a kube-apiserver list with
-limit=1 (3 nodes, 5 namespaces, 1 pod) for the probe test."""
+limit=1 (3 nodes, 5 namespaces, 1 pod) for the probe test, pretty-printed as
+the API server answers curl."""
 import gzip
 import http.server
 import json
@@ -21,7 +22,7 @@ LISTS = {
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         body = LISTS.get(self.path.split("?")[0])
-        data = json.dumps(body or {}, separators=(",", ":")).encode()
+        data = json.dumps(body or {}, indent=2).encode()
         self.send_response(200 if body else 404)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
