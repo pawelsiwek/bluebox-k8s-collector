@@ -1,0 +1,32 @@
+# Smoke config for `validate` in CI: wires the three Bluebox components and
+# groupbyattrs so a build that lost any of them fails (README.md § "Image").
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:4318
+processors:
+  groupbyattrs/pod:
+    keys: [k8s.pod.uid]
+  dtk8stopology:
+    cluster_name: smoke
+    cluster_uid: 00000000-0000-0000-0000-000000000000
+  dtk8seventsprocessor:
+    cluster_name: smoke
+    cluster_uid: 00000000-0000-0000-0000-000000000000
+connectors:
+  alertingengine: {}
+exporters:
+  debug: {}
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      exporters: [alertingengine]
+    logs/alerts:
+      receivers: [alertingengine]
+      exporters: [debug]
+    logs:
+      receivers: [otlp]
+      processors: [groupbyattrs/pod, dtk8stopology, dtk8seventsprocessor]
+      exporters: [debug]

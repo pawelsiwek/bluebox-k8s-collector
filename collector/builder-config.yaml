@@ -1,0 +1,89 @@
+# OCB build of the Bluebox Kubernetes collector.
+# Generated from build/dynatrace-manifest-v0.58.1.yaml (Dynatrace/dynatrace-otel-collector
+# tag v0.58.1, commit 5920bfa6d0fe288b5a61c632debc474c031b445a) by keeping every component at
+# its pinned version and making exactly these changes (manifest_test.go enforces them):
+#   - dropped the Dynatrace-internal eecprovider confmap provider (lives in their repo);
+#   - added groupbyattrsprocessor (topology namespace-batch fix) at the manifest's contrib version;
+#   - added dtk8stopology, dtk8seventsprocessor and alertingengine from this module;
+#   - security overrides in `replaces:` for fixable HIGH/CRITICAL findings (README.md § "Security overrides").
+# To bump: vendor the new tag's manifest.yaml under build/, apply the same three changes, and
+# move the module's go.opentelemetry.io/collector pins to the same release (README § "Bumping").
+dist:
+  module: github.com/pawelsiwek/bluebox-k8s-collector/collector/distribution
+  name: bluebox-otelcol
+  description: Bluebox Kubernetes collector (Dynatrace distribution v0.58.1 + Kubernetes topology components)
+  output_path: ./_build
+  version: 0.1.0
+
+receivers:
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/filelogreceiver v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/fluentforwardreceiver v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/hostmetricsreceiver v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/jaegerreceiver v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/journaldreceiver v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/netflowreceiver v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/statsdreceiver v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/syslogreceiver v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/zipkinreceiver v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8sobjectsreceiver v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/kubeletstatsreceiver v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8sclusterreceiver v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/k8seventsreceiver v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/kafkareceiver v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/receiver/kafkametricsreceiver v0.162.0
+
+exporters:
+  - gomod: go.opentelemetry.io/collector/exporter/debugexporter v0.162.0
+  - gomod: go.opentelemetry.io/collector/exporter/otlpexporter v0.162.0
+  - gomod: go.opentelemetry.io/collector/exporter/otlphttpexporter v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/loadbalancingexporter v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/exporter/kafkaexporter v0.162.0
+
+extensions:
+  - gomod: go.opentelemetry.io/collector/extension/zpagesextension v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/bearertokenauthextension v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/oidcauthextension v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/k8sleaderelector v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/healthcheckextension v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage/filestorage v0.162.0
+
+processors:
+  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.162.0
+  - gomod: go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/attributesprocessor v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/cumulativetodeltaprocessor v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/filterprocessor v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/k8sattributesprocessor v1.1.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/metricstarttimeprocessor v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/probabilisticsamplerprocessor v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/redactionprocessor v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourcedetectionprocessor v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/resourceprocessor v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/tailsamplingprocessor v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/genainormalizerprocessor v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/transformprocessor v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/processor/groupbyattrsprocessor v0.162.0
+  - gomod: github.com/pawelsiwek/bluebox-k8s-collector/collector v0.0.0
+    import: github.com/pawelsiwek/bluebox-k8s-collector/collector/processor/dtk8stopology
+  - gomod: github.com/pawelsiwek/bluebox-k8s-collector/collector v0.0.0
+    import: github.com/pawelsiwek/bluebox-k8s-collector/collector/processor/dtk8seventsprocessor
+connectors:
+  - gomod: github.com/pawelsiwek/bluebox-k8s-collector/collector v0.0.0
+    import: github.com/pawelsiwek/bluebox-k8s-collector/collector/connector/alertingengine
+  - gomod: go.opentelemetry.io/collector/connector/forwardconnector v0.162.0
+  - gomod: github.com/open-telemetry/opentelemetry-collector-contrib/connector/spanmetricsconnector v0.162.0
+
+providers:
+  - gomod: go.opentelemetry.io/collector/confmap/provider/envprovider v1.68.0
+  - gomod: go.opentelemetry.io/collector/confmap/provider/fileprovider v1.68.0
+  - gomod: go.opentelemetry.io/collector/confmap/provider/httpprovider v1.68.0
+  - gomod: go.opentelemetry.io/collector/confmap/provider/httpsprovider v1.68.0
+  - gomod: go.opentelemetry.io/collector/confmap/provider/yamlprovider v1.68.0
+
+replaces:
+  - github.com/pawelsiwek/bluebox-k8s-collector/collector => ../
+  # Security overrides (README.md § "Security overrides"); drop each once the pinned
+  # Dynatrace manifest's release carries the fix.
+  - golang.org/x/net => golang.org/x/net v0.60.0  # CVE-2026-78669, GO-2026-6603/6610/6611/6612/6617 (x/net/http2), fixed in 0.60.0
