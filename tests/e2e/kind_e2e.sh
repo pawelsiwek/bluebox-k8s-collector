@@ -19,8 +19,27 @@ ns=bluebox-otelcol
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 k() { kubectl --context "kind-$cluster" "$@"; }
-fail() { echo "FAIL: $*" >&2; k -n "$ns" get pods -o wide >&2 || true; k -n sink logs deploy/otlp-sink --tail=20 >&2 || true; exit 1; }
-records() { k -n sink exec deploy/otlp-sink -- cat /data/sink.jsonl > "$work/sink.jsonl"; }
+# The exporter appends /v1/<signal> to the endpoint path, so the sink records
+# /api/v2/otlp/v1/logs; filters match on the suffix.
+records() { k -n sink exec deploy/otlp-sink -- sh -c 'cat /data/sink.jsonl 2>/dev/null || true' > "$work/sink.jsonl"; }
+diag() {
+  echo "--- diagnostics"
+  k get pods -A -o wide
+  for p in $(k get pods -A --no-headers | awk '$4 != "Running" && $4 != "Completed" {print $1 "/" $2}'); do
+    echo "--- describe pod $p"; k -n "${p%%/*}" describe pod "${p#*/}" | sed -n '/^Events:/,$p'
+  done
+  for n in "$ns" sink demo; do echo "--- events $n"; k -n "$n" get events --sort-by=.lastTimestamp | tail -n 15; done
+  echo "--- sink requests by path"
+  records; jq -r '.path' "$work/sink.jsonl" | sort | uniq -c
+  echo "--- sink log"
+  k -n sink logs deploy/otlp-sink --tail=20
+  for r in agent cluster; do
+    echo "--- $r collector warnings and errors"
+    k -n "$ns" logs -l "app.kubernetes.io/instance=bluebox-otelcol-$r" --prefix --tail=-1 \
+      | grep -E '"level":"(warn|error)"|Exporting failed|^E[0-9]{4}' | grep -v 'legacy service.telemetry' | tail -n 20
+  done
+}
+fail() { echo "FAIL: $*" >&2; diag >&2 2>&1 || true; exit 1; }
 
 kind get clusters | grep -qx "$cluster" || kind create cluster --name "$cluster" --wait 120s
 
@@ -126,13 +145,13 @@ EOF
 
 # Topology pull interval is 120s; wait for the pod's k8s.object.
 i=0
-until records && jq -e 'select(.path == "/v1/logs") | .body.resourceLogs[].scopeLogs[].logRecords[] | select(any(.attributes[]; .key == "k8s.pod.name" and .value.stringValue == "secretive")) | select(any(.attributes[]; .key == "k8s.object"))' "$work/sink.jsonl" >/dev/null 2>&1; do
+until records && jq -e 'select(.path | endswith("/v1/logs")) | .body.resourceLogs[].scopeLogs[].logRecords[] | select(any(.attributes[]; .key == "k8s.pod.name" and .value.stringValue == "secretive")) | select(any(.attributes[]; .key == "k8s.object"))' "$work/sink.jsonl" >/dev/null 2>&1; do
   i=$((i + 1)); [ $i -gt 60 ] && fail "no topology record for demo/secretive"; sleep 5
 done
 for s in E2E_ARG_SECRET E2E_ENV_SECRET E2E_PROBE_SECRET; do
   if grep -q "$s" "$work/sink.jsonl"; then fail "secret $s reached the exporter"; fi
 done
-jq -e 'select(.path == "/v1/logs") | .body.resourceLogs[].scopeLogs[].logRecords[].attributes[] | select(.key == "k8s.object") | .value.stringValue | fromjson | select(.metadata.name == "secretive") | .spec.containers[0].env[] | select(.name == "REF") | .valueFrom.fieldRef' "$work/sink.jsonl" >/dev/null \
+jq -e 'select(.path | endswith("/v1/logs")) | .body.resourceLogs[].scopeLogs[].logRecords[].attributes[] | select(.key == "k8s.object") | .value.stringValue | fromjson | select(.metadata.name == "secretive") | .spec.containers[0].env[] | select(.name == "REF") | .valueFrom.fieldRef' "$work/sink.jsonl" >/dev/null \
   || fail "valueFrom not kept"
 echo "ok: redaction in a live cluster"
 
@@ -141,13 +160,13 @@ echo "ok: redaction in a live cluster"
 # container.image.tag -> container.image.tags (agent extracts it).
 if grep -qF '"key": "container.image.tag"' "$work/sink.jsonl"; then fail "v0 attribute container.image.tag present"; fi
 grep -qF '"key": "container.image.tags"' "$work/sink.jsonl" || fail "v1 attribute container.image.tags missing"
-jq -e '[.body.resourceMetrics[]?.resource.attributes[]?.key] | index("k8s.cluster.uid")' "$work/sink.jsonl" >/dev/null || fail "k8s.cluster.uid missing on metrics"
+jq -s -e '[.[] | select(.path | endswith("/v1/metrics")) | .body.resourceMetrics[]?.resource.attributes[]?.key] | index("k8s.cluster.uid")' "$work/sink.jsonl" >/dev/null || fail "k8s.cluster.uid missing on metrics"
 echo "ok: v1 attribute names"
 
 # --- event dedup with 2 replicas ---
 sleep 60; records
-dups=$(jq -r 'select(.path == "/v1/logs") | .body.resourceLogs[].scopeLogs[].logRecords[] | select(any(.attributes[]; .key == "event.domain" and .value.stringValue == "k8s")) | [(.attributes[] | select(.key == "k8s.event.uid") | .value.stringValue), (.attributes[] | select(.key == "k8s.event.count") | .value.intValue // .value.stringValue)] | @tsv' "$work/sink.jsonl" | sort | uniq -d | wc -l)
-total=$(jq -r 'select(.path == "/v1/logs") | .body.resourceLogs[].scopeLogs[].logRecords[] | select(any(.attributes[]; .key == "event.domain")) | 1' "$work/sink.jsonl" | wc -l)
+dups=$(jq -r 'select(.path | endswith("/v1/logs")) | .body.resourceLogs[].scopeLogs[].logRecords[] | select(any(.attributes[]; .key == "event.domain" and .value.stringValue == "k8s")) | [(.attributes[] | select(.key == "k8s.event.uid") | .value.stringValue), (.attributes[] | select(.key == "k8s.event.count") | .value.intValue // .value.stringValue)] | @tsv' "$work/sink.jsonl" | sort | uniq -d | wc -l)
+total=$(jq -r 'select(.path | endswith("/v1/logs")) | .body.resourceLogs[].scopeLogs[].logRecords[] | select(any(.attributes[]; .key == "event.domain")) | 1' "$work/sink.jsonl" | wc -l)
 [ "$total" -gt 0 ] || fail "no k8s events exported"
 [ "$dups" -eq 0 ] || fail "$dups duplicated events with 2 replicas"
 echo "ok: $total events, none duplicated across 2 replicas"
