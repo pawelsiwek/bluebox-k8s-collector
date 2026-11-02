@@ -27,7 +27,7 @@ global:
       edgeConnectImage: docker.io/dynatrace/edgeconnect@sha256:06dbb89f5981c2b6b191e1164432d55f426cc6f929be9d85e234451b0f95b11a  # 1.811.4
       mcpServerImage: quay.io/containers/kubernetes_mcp_server@sha256:1da9d62ad0c008a6cadcf2718c86c2e2d18753ca1d9f1f3313068980794b24f2  # v0.0.69
       # TODO: pin the redactor image by digest once it is published.
-      redactorImage: ghcr.io/pawelsiwek/k8s-mcp-redactor@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      redactorImage: ghcr.io/pawelsiwek/k8s-mcp-redactor@sha256:155005527fa4154c6cc6272fc2c996d2efd7093b0dba938c5fbcbd0132b3794b
 
 extraManifests:
   # ---- kubernetes-mcp-server: read-only, Secrets and ConfigMaps denied ----

@@ -85,7 +85,7 @@ global:
 image:
   repository: ghcr.io/pawelsiwek/bluebox-otelcol
   tag: "0.1.0"
-  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  digest: sha256:0dcac4b1d033f72bfa169311f04732609994ba2971a0b3bbd17c056479e8edc8
   pullPolicy: IfNotPresent
 command:
   name: bluebox-otelcol
