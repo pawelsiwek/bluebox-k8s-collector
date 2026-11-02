@@ -57,7 +57,7 @@ yq 'select(.kind == "ConfigMap" and .data.relay != null) | .data.relay' "$work/r
 yq "{
   \"extensions\": {\"bearertokenauth\": .extensions.bearertokenauth},
   \"receivers\": {\"otlp/self\": .receivers.\"otlp/self\"},
-  \"processors\": (.processors | with_entries(select(.key == \"resource/bluebox\" or .key == \"transform/drop_empty\" or .key == \"filter/allowlist\" or .key == \"memory_limiter\" or .key == \"batch\"))),
+  \"processors\": (.processors | with_entries(select(.key == \"resource/bluebox\" or .key == \"transform/drop_empty\" or .key == \"filter/allowlist\" or .key == \"memory_limiter\" or .key == \"cumulativetodelta\" or .key == \"batch\"))),
   \"exporters\": {\"otlp_http/bluebox\": .exporters.\"otlp_http/bluebox\"},
   \"service\": {
     \"extensions\": [\"bearertokenauth\"],
