@@ -276,11 +276,13 @@ The flow is EdgeConnect → `k8s-mcp-<uid8>.bluebox.internal:8080` → redactor
 
 ## Install
 
-`install/snippet.template.txt` is what the wizard fills in. It is plain
-`helm`/`kubectl` lines with no variables, pipes or continuations, so it
-works in bash, zsh, fish, PowerShell and cmd. The token Secret is pasted on
-stdin (`kubectl apply -f -`), so it never appears on a command line or in
-history. Both releases install with `--wait --atomic`. The `helm test` probe
+`install/snippet.template.txt` is what the wizard fills in: one bash or zsh
+subshell, pasted as a whole. The shell parses the whole subshell first, so
+`read -rs` then waits for the token. It hides the input, and kubectl reads the
+token from stdin, so the token never appears on a command line, in history or
+in the process list. The body has no comment lines, because interactive zsh
+rejects them by default. On Windows, run it in WSL. Both releases install
+with `--wait --atomic`. The `helm test` probe
 belongs to the agent release, which is installed first. Verify with:
 
 ```
@@ -356,7 +358,7 @@ from `make -C collector image`); the Dynatrace image is pulled by digest.
 | `make podlogs` | the `{a,b}` namespace glob reads only allowlisted namespaces; kube-system and the collector namespace stay excluded with `*` | container |
 | `make static` | PSA `restricted` without pod logs, no hostPort, no `nodes/proxy`, no Secret/ConfigMap RBAC, digest pins, v1 gates, one leader elector, redaction first, intake Service `Local` | local |
 | `make schema` | every values file matches `values/values.schema.json`; 10 bad inputs rejected | local (uv) |
-| `make snippet` | snippet is shell-agnostic, Secret via stdin, `--wait --atomic`, files exist | local |
+| `make snippet` | snippet parses in bash and zsh, one subshell, no comment lines, token only on stdin, `--wait --atomic`, files exist | local |
 | `make redaction` | both image variants: no env value, command argument or probe header reaches the exporter; `valueFrom` kept; K8S_CLUSTER record; CONTAINER fan-out with image (Bluebox) or ownerReferences workload (Dynatrace) | container |
 | `make events` | Bluebox image: events forwarded with `event.domain=k8s`, OOM kill inferred from a pod watch, raw pod watch records never exported | container |
 | `make heartbeat` | `otelcol_process_uptime` with C1 attributes; token A → B without restart (kubelet-style projection) | container |

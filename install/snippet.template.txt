@@ -1,6 +1,8 @@
-# Bluebox Kubernetes OTel collector: install (one command per line).
-# Works unchanged in bash, zsh, fish, PowerShell and cmd: no variables, pipes,
-# line continuations or shell quoting beyond plain double quotes.
+# Bluebox Kubernetes collector: install snippet for bash or zsh.
+# The whole snippet is one subshell, so the shell reads all of it before it
+# runs anything: `read -rs` then waits for the token, hides it, and keeps it
+# out of shell history and the process list; kubectl reads it from stdin.
+# The body has no comments because interactive zsh rejects them by default.
 # Placeholders the wizard fills: <REF> (commit of a values-vX.Y.Z tag),
 # <DISTRO> (aks|eks|gke|local), <CLUSTER_NAME>, <ENDPOINT>, <PSA_LEVEL>
 # (restricted, or privileged only when pod logs are on), <AGENT_EXTRA_FILES>
@@ -9,25 +11,17 @@
 # <AGENT_EXTRA_SETS> (" --set \"global.bluebox.podLogs.namespaces={shop,payments}\"").
 # <BASE> = https://raw.githubusercontent.com/pawelsiwek/bluebox-k8s-collector/<REF>/values
 
+(
+set -e
 helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts --force-update
-kubectl create namespace bluebox-otelcol
+kubectl create namespace bluebox-otelcol --dry-run=client -o yaml | kubectl apply -f -
 kubectl label namespace bluebox-otelcol pod-security.kubernetes.io/enforce=<PSA_LEVEL> pod-security.kubernetes.io/warn=<PSA_LEVEL> pod-security.kubernetes.io/audit=<PSA_LEVEL> --overwrite
-
-# Token: run the next command and paste the Secret block below it. Replace
-# <TOKEN> with the token that the wizard's "Show token" reveals, then press
-# Ctrl-D (Ctrl-Z then Enter on Windows).
-# The token never appears on a command line or in shell history.
-kubectl apply -n bluebox-otelcol -f -
-apiVersion: v1
-kind: Secret
-metadata:
-  name: bluebox-otelcol-token
-type: Opaque
-stringData:
-  token: <TOKEN>
-
+printf 'Paste the Bluebox ingest token (input is hidden), then press Enter: '
+read -rs BLUEBOX_TOKEN
+echo
+[ -n "$BLUEBOX_TOKEN" ] || { echo 'No token entered; nothing installed.' >&2; exit 1; }
+printf '%s' "$BLUEBOX_TOKEN" | kubectl create secret generic bluebox-otelcol-token --namespace bluebox-otelcol --from-file=token=/dev/stdin --dry-run=client -o yaml | kubectl apply -f -
 helm upgrade --install bluebox-otelcol-agent open-telemetry/opentelemetry-collector --version 0.177.0 --namespace bluebox-otelcol --wait --atomic --timeout 10m -f <BASE>/common.yaml -f <BASE>/agent.yaml -f <BASE>/overlays/<DISTRO>/agent.yaml<AGENT_EXTRA_FILES> --set "global.bluebox.clusterName=<CLUSTER_NAME>" --set "global.bluebox.endpoint=<ENDPOINT>"<AGENT_EXTRA_SETS>
 helm upgrade --install bluebox-otelcol-cluster open-telemetry/opentelemetry-collector --version 0.177.0 --namespace bluebox-otelcol --wait --atomic --timeout 10m -f <BASE>/common.yaml -f <BASE>/cluster.yaml -f <BASE>/overlays/<DISTRO>/cluster.yaml<CLUSTER_EXTRA_FILES> --set "global.bluebox.clusterName=<CLUSTER_NAME>" --set "global.bluebox.endpoint=<ENDPOINT>"
-
-# Verify: prints otlp_status, cause, ready and counts; paste the output into the wizard.
 helm test bluebox-otelcol-agent --namespace bluebox-otelcol --logs
+)
