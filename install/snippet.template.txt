@@ -13,8 +13,9 @@ helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm
 kubectl create namespace bluebox-otelcol
 kubectl label namespace bluebox-otelcol pod-security.kubernetes.io/enforce=<PSA_LEVEL> pod-security.kubernetes.io/warn=<PSA_LEVEL> pod-security.kubernetes.io/audit=<PSA_LEVEL> --overwrite
 
-# Token: run the next command, paste the Secret block below it (the wizard's
-# "Show token" fills <TOKEN>), then press Ctrl-D (Ctrl-Z then Enter on Windows).
+# Token: run the next command and paste the Secret block below it. Replace
+# <TOKEN> with the token that the wizard's "Show token" reveals, then press
+# Ctrl-D (Ctrl-Z then Enter on Windows).
 # The token never appears on a command line or in shell history.
 kubectl apply -n bluebox-otelcol -f -
 apiVersion: v1
