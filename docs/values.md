@@ -59,6 +59,11 @@ breaks the template.
 
 - **Agent metadata** includes `container.image.name` and
   `container.image.tags`, the v1 name; v0 was `container.image.tag`.
+- **Known v0 exception:** the `k8s_cluster` receiver still emits
+  `container.image.tag` (v0). The upstream receiver has no switch to the v1
+  name yet. Nothing in Bluebox reads the attribute, so the cluster release
+  keeps it instead of adding a processor to drop it. Remove it once upstream
+  emits only the v1 name.
 - **Resource attributes on every signal:** `k8s.cluster.uid`,
   `k8s.cluster.name`, `bluebox.collector.version`, `bluebox.collector.role`,
   and v1 `k8s.*` names from `k8s_attributes`. The gates
