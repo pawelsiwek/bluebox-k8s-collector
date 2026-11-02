@@ -325,8 +325,8 @@ the agent release.
   apply the rendered Pod as a PostSync hook.
 - Namespace PSA labels belong in the namespace manifest you manage:
   `restricted`, or `privileged` only with pod logs.
-- Pin the values by a `values-vX.Y.Z` tag: `-f https://raw.githubusercontent.com/pawelsiwek/bluebox-k8s-collector/values-vX.Y.Z/values/…`,
-  or vendor the files.
+- Pin the values by the commit a `values-vX.Y.Z` tag points to: `-f https://raw.githubusercontent.com/pawelsiwek/bluebox-k8s-collector/<commit>/values/…`,
+  or vendor the files. A tag can move; a commit cannot. The Bluebox snippet uses the commit.
 
 ## Security preview
 

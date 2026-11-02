@@ -1,7 +1,7 @@
 # Bluebox Kubernetes OTel collector: install (one command per line).
 # Works unchanged in bash, zsh, fish, PowerShell and cmd: no variables, pipes,
 # line continuations or shell quoting beyond plain double quotes.
-# Placeholders the wizard fills: <REF> (values-vX.Y.Z tag of this repository),
+# Placeholders the wizard fills: <REF> (commit of a values-vX.Y.Z tag),
 # <DISTRO> (aks|eks|gke|local), <CLUSTER_NAME>, <ENDPOINT>, <PSA_LEVEL>
 # (restricted, or privileged only when pod logs are on), <AGENT_EXTRA_FILES>
 # and <CLUSTER_EXTRA_FILES> (" -f <BASE>/overlays/autopilot/agent.yaml",
