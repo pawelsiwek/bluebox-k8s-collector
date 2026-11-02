@@ -1,6 +1,6 @@
 #!/bin/sh
 # Print the image to run for a rendered release: the collector container's
-# image, except that the unpublished Bluebox image (zero-digest pin TODO)
+# image, except that the Bluebox image with the zero placeholder digest on main
 # maps to a locally built one, BLUEBOX_IMAGE (default localhost/bluebox-otelcol:dev,
 # built with `make -C collector image`).
 #   collector_image.sh <rendered.yaml>

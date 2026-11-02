@@ -8,7 +8,7 @@ chart of its own. Paths below are relative to the repository root.
 | | |
 |---|---|
 | Chart | `open-telemetry/opentelemetry-collector` **0.177.0** |
-| Image (default) | `ghcr.io/pawelsiwek/bluebox-otelcol:0.1.0`, `command.name: bluebox-otelcol`. Digest pin is a TODO until the first release; tests use a local build (see "Image variants") |
+| Image (default) | `ghcr.io/pawelsiwek/bluebox-otelcol:0.1.0`, `command.name: bluebox-otelcol`. `main` holds a zero digest; tag `values-vX.Y.Z` pins the published digest (see "Image variants") |
 | Image (switch) | `public.ecr.aws/dynatrace/dynatrace-otel-collector:0.58.1@sha256:29a09e6a…6c5589`, `command.name: dynatrace-otel-collector` (`overlays/dynatrace-image/<role>.yaml`) |
 | Probe image | `curlimages/curl:8.23.0@sha256:11e64e28…6aa8ac` |
 | Values release | `global.bluebox.collectorVersion` = `0.1.0` (exported as `bluebox.collector.version`) |
@@ -143,11 +143,11 @@ the pod map. Its CONTAINER records copy only identity fields and
 The Bluebox image is a bridge. Switch to the Dynatrace image once Dynatrace
 ships equivalent components or native topology.
 
-Until the first Bluebox image release is published, `image.digest` holds a
-zero placeholder (`make static` reports it). `scripts/collector_image.sh`
-then runs `BLUEBOX_IMAGE`, default `localhost/bluebox-otelcol:dev`, built
-with `make -C collector image`. The tests need
-that image for the default variant.
+On `main`, `image.digest` holds a zero placeholder (`make static` reports
+it). The release workflow pins the published digest on tag `values-vX.Y.Z`.
+On the zero digest, `scripts/collector_image.sh` runs `BLUEBOX_IMAGE`,
+default `localhost/bluebox-otelcol:dev`, built with
+`make -C collector image`. The tests need that image for the default variant.
 
 ## Token
 

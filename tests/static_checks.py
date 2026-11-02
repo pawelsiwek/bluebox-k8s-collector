@@ -54,7 +54,7 @@ for f in sorted(glob.glob(os.path.join(sys.argv[1], "*.yaml"))):
                 if REQUIRE_PINNED:
                     fail(f, f"placeholder digest: {img}")
                 else:
-                    notes.append(f"placeholder digest (pin TODO): {img}")
+                    notes.append(f"placeholder digest (pinned at release): {img}")
 
     # The API server rejects a Service with no ports; helm template does not.
     for d in docs:
