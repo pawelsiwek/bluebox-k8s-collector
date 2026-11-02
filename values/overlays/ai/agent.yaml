@@ -79,5 +79,5 @@ config:
     pipelines:
       metrics/ai:
         receivers: [prometheus/ai]
-        processors: [memory_limiter, k8s_attributes, resource/bluebox, transform/drop_empty, transform/workload, filter/allowlist, batch]
+        processors: [memory_limiter, k8s_attributes, resource/bluebox, transform/drop_empty, transform/workload, filter/allowlist, cumulativetodelta, batch]
         exporters: [otlp_http/bluebox]

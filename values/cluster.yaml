@@ -288,7 +288,7 @@ config:
     pipelines:
       metrics:
         receivers: [k8s_cluster]
-        processors: [memory_limiter, k8s_attributes, resource/bluebox, transform/drop_empty, transform/workload, transform/openpipeline_source_metrics, filter/allowlist, batch]
+        processors: [memory_limiter, k8s_attributes, resource/bluebox, transform/drop_empty, transform/workload, transform/openpipeline_source_metrics, filter/allowlist, cumulativetodelta, batch]
         exporters: [otlp_http/bluebox]
       logs/events:
         receivers: [k8s_events, k8s_objects/pod_watch]

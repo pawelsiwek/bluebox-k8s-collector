@@ -126,6 +126,8 @@ for f in sorted(glob.glob(os.path.join(sys.argv[1], "*.yaml"))):
             fail(f, f"pipeline {pname} exports to {p['exporters']}")
         if p["processors"][0] != "memory_limiter":
             fail(f, f"pipeline {pname} does not start with memory_limiter")
+        if pname.startswith("metrics") and p["processors"][-2:] != ["cumulativetodelta", "batch"]:
+            fail(f, f"pipeline {pname} does not convert to delta before batch (Dynatrace rejects cumulative)")
     if (cfg.get("extensions") or {}).get("bearertokenauth", {}).get("wait_for_token_file") is not True:
         fail(f, "bearertokenauth wait_for_token_file not set")
 

@@ -204,6 +204,9 @@ config:
         http:
           endpoint: 127.0.0.1:14318
   processors:
+    # Dynatrace ingests delta sums and histograms only, and rejects a request
+    # of cumulative metrics with 400, which drops the heartbeat.
+    cumulativetodelta: {}
     batch:
       timeout: 10s
       send_batch_size: 1000
@@ -305,7 +308,7 @@ config:
       metrics: null
       metrics/self:
         receivers: [otlp/self]
-        processors: [memory_limiter, resource/bluebox, transform/drop_empty, filter/allowlist, batch]
+        processors: [memory_limiter, resource/bluebox, transform/drop_empty, filter/allowlist, cumulativetodelta, batch]
         exporters: [otlp_http/bluebox]
 
 resources:

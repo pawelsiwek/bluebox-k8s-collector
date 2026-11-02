@@ -116,12 +116,12 @@ config:
     pipelines:
       metrics:
         receivers: [kubelet_stats]
-        processors: [memory_limiter, k8s_attributes, resource/bluebox, transform/drop_empty, transform/workload, filter/allowlist, batch]
+        processors: [memory_limiter, k8s_attributes, resource/bluebox, transform/drop_empty, transform/workload, filter/allowlist, cumulativetodelta, batch]
         exporters: [otlp_http/bluebox]
       # App OTLP intake: passed through (no allowlist on app telemetry).
       metrics/apps:
         receivers: [otlp]
-        processors: [memory_limiter, k8s_attributes, resource/bluebox, transform/drop_empty, transform/workload, batch]
+        processors: [memory_limiter, k8s_attributes, resource/bluebox, transform/drop_empty, transform/workload, cumulativetodelta, batch]
         exporters: [otlp_http/bluebox]
       traces/apps:
         receivers: [otlp]
@@ -237,7 +237,8 @@ extraManifests:
         cacert=""
         [ -n "${CA_FILE:-}" ] && [ -s "$CA_FILE" ] && cacert="--cacert $CA_FILE"
 
-        # OTLP probe: an empty, valid ExportMetricsServiceRequest.
+        # OTLP probe: an empty ExportMetricsServiceRequest in protobuf (zero bytes).
+        # Dynatrace answers 415 to OTLP/JSON, so the probe must not send JSON.
         status=000; cause=unknown
         if [ -s "$TOKEN_FILE" ]; then
           read -r tok _ < "$TOKEN_FILE" || true
@@ -245,8 +246,8 @@ extraManifests:
           printf 'Authorization: %s %s\n' "$TOKEN_SCHEME" "$tok" > "$H"
           unset tok
           status=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 $cacert \
-            -H @"$H" -H 'Content-Type: application/json' \
-            --data '{"resourceMetrics":[]}' "${BLUEBOX_ENDPOINT%/}/v1/metrics" 2>/tmp/curl.err)
+            -H @"$H" -H 'Content-Type: application/x-protobuf' \
+            --data-binary @/dev/null "${BLUEBOX_ENDPOINT%/}/v1/metrics" 2>/tmp/curl.err)
           rc=$?
           rm -f "$H"
           # A received HTTP status wins over a late transport error.
