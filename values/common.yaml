@@ -78,8 +78,8 @@ global:
 # Bluebox collector image (bridge): the Dynatrace OTel distribution v0.58.1 plus the
 # Kubernetes topology components (dtk8stopology, dtk8seventsprocessor, alertingengine).
 # Built from collector/ in this repository (collector/README.md).
-# TODO: set tag + digest from the first published release (a repository tag vX.Y.Z publishes
-# image tag X.Y.Z); until then validate.sh and the tests use a locally built image
+# main keeps a zero placeholder digest; the release workflow pins the published tag and
+# digest on tag values-vX.Y.Z (README "Releasing"). Local tests run a locally built image
 # (BLUEBOX_IMAGE, default localhost/bluebox-otelcol:dev; `make -C collector image`).
 # Switch to the stock Dynatrace image with overlays/dynatrace-image/<role>.yaml.
 image:
