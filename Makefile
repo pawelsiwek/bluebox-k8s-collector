@@ -36,7 +36,7 @@ test-go:
 	@test -z "$$(gofmt -l redactor)" || { gofmt -l redactor; exit 1; }
 
 test-topology:
-	@cd topology && $(PY) -m unittest test_extension_pin
+	@cd topology && $(PY) -m unittest test_extension_pin test_ca_public
 	@cd topology/routing && $(PY) -m unittest test_merge_routing
 
 # Every values test, both image variants. The Bluebox image must exist locally

@@ -32,30 +32,32 @@ export CTX=<dtctl-context> WS=<workspace-uuid> T=topology
 export RUN=$(mktemp -d)   # keep this directory until the run is verified
 ```
 
-## 1. Build and sign the extension (Bluebox signing)
+## 1. Get the signed extension from a release
 
-The extension is upstream's release, unmodified. The pin test below fails on any hand edit; fixes go upstream, then the pin moves.
+The `topology-extension` job of the release workflow assembles the pinned upstream source, signs it with the Bluebox developer certificate and checks the signature against `topology/ca.pem`. It attaches `dt-k8s-otel-topology-<version>.zip`, its `.sha256` and `ca.pem` to the GitHub Release. Nobody signs on a laptop.
 
 ```bash
-python3 -m unittest discover -s $T -p 'test_extension_pin.py'
-dt extensions assemble --src $T/extension/src -o $RUN/ext.zip --force
-dt extensions sign --src $RUN/ext.zip -o $RUN/bundle.zip --key <bluebox-developer.pem> --force
-shasum -a 256 $RUN/bundle.zip   # record next to the extension version in the change log of this run
+export TAG=<release tag, e.g. v0.1.2> V=1.3.3
+gh release download $TAG --repo pawelsiwek/bluebox-k8s-collector --dir $RUN \
+  --pattern "dt-k8s-otel-topology-$V.zip*" --pattern ca.pem
+(cd $RUN && shasum -a 256 -c dt-k8s-otel-topology-$V.zip.sha256)
+cmp $RUN/ca.pem $T/ca.pem && echo "CA matches the repository"
 ```
 
 **Key custody.**
-- The developer certificate is issued by the Bluebox extension CA. The POC CA generated on 2026-10-07 is throwaway and must never sign anything that reaches a tenant.
-- Until the KMS/HSM release pipeline exists (deferred), the CA key stays offline with the named key custodian, and signing is a two-person step.
+- `topology/ca.pem` is the public Bluebox extension CA. Its key stays offline with the named key custodian and never enters the repository or CI.
+- The developer certificate lives only in the `EXTENSION_SIGNING_PEM` secret of the `release` environment. Required reviewers on that environment make signing a two-person step.
+- The POC CA generated on 2026-10-07 is throwaway and must never sign anything that reaches a tenant.
 - A CA key compromise reaches every tenant that trusts the CA. Revocation means removing the CA from every tenant (§7) and re-signing with a new CA.
 
 ## 2. Upload the CA certificate
 
-Upload the Bluebox CA public certificate (`ca.pem`, **never** the key) as a trusted extension root on the tenant. Post it to `/api/v2/extensions/developerCertificates` with a classic token that has the extension write scope. The governed path may need credential-vault write instead. Record which route the tenant accepted. Upload it once per tenant: re-uploading the same CA is harmless.
+Upload the Bluebox CA public certificate (`$RUN/ca.pem`, **never** the key) as a trusted extension root on the tenant. Post it to `/api/v2/extensions/developerCertificates` with a classic token that has the extension write scope. The governed path may need credential-vault write instead. Record which route the tenant accepted. Upload it once per tenant: re-uploading the same CA is harmless.
 
 ## 3. Install the extension
 
 ```bash
-dt extensions upload $RUN/bundle.zip --tenant-url https://<tenant>.live.dynatrace.com --api-token "$DT_API_TOKEN"
+dt extensions upload $RUN/dt-k8s-otel-topology-$V.zip --tenant-url https://<tenant>.live.dynatrace.com --api-token "$DT_API_TOKEN"
 ```
 
 Then resolve the objectId of the bundled logs pipeline. The routing entry references it by objectId, not by `customId`, and it changes if the extension is reinstalled.

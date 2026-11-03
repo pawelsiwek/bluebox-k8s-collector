@@ -162,3 +162,43 @@ jobs:
           } > "$RUNNER_TEMP/notes.md"
           gh release create "$TAG" --repo "$REPO" --verify-tag --title "$TAG" \
             --notes-file "$RUNNER_TEMP/notes.md" "$RUNNER_TEMP"/out/*.spdx.json
+
+  topology-extension:
+    name: sign topology extension
+    needs: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: release      # holds EXTENSION_SIGNING_PEM; required reviewers gate this job
+    permissions:
+      contents: write         # upload the signed bundle to the GitHub Release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          enable-cache: false
+      - name: Assemble, sign and verify against topology/ca.pem
+        env:
+          SIGNING_PEM: ${{ secrets.EXTENSION_SIGNING_PEM }}
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/topology"; mkdir -p "$out"
+          version=$(sed -n 's/^version: *//p' topology/extension/src/extension.yaml)
+          bundle="$out/dt-k8s-otel-topology-${version}.zip"
+          dt() { uvx --from dt-cli==1.6.21 dt "$@"; }
+          dt extensions assemble --src topology/extension/src -o "$out/extension.zip" --force
+          umask 077
+          printf '%s\n' "$SIGNING_PEM" > "$out/developer.pem"
+          dt extensions sign --src "$out/extension.zip" -o "$bundle" --key "$out/developer.pem" --force
+          rm -f "$out/developer.pem"
+          mkdir "$out/verify" && (cd "$out/verify" && unzip -q "$bundle")
+          openssl cms -verify -binary -inform PEM -in "$out/verify/extension.zip.sig" \
+            -content "$out/verify/extension.zip" -CAfile topology/ca.pem -purpose any -out /dev/null
+          (cd "$out" && sha256sum "$(basename "$bundle")" > "$(basename "$bundle").sha256")
+          echo "BUNDLE=$bundle" >> "$GITHUB_ENV"
+      - name: Attach the signed bundle and the CA to the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release upload "$TAG" --repo "${{ github.repository }}" "$BUNDLE" "$BUNDLE.sha256" topology/ca.pem

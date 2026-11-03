@@ -2,3 +2,6 @@
 .tools/
 # Rendered manifests from `make render`
 .out/
+# Extension signing material never lives in the repository; only topology/ca.pem (public) does.
+*.key
+developer.pem
