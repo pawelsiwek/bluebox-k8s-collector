@@ -8,7 +8,10 @@
 # (restricted, or privileged only when pod logs are on), <AGENT_EXTRA_FILES>
 # and <CLUSTER_EXTRA_FILES> (" -f <BASE>/overlays/autopilot/agent.yaml",
 # " -f <BASE>/pod-logs.agent.yaml", " -f <BASE>/overlays/ai/agent.yaml", ...),
-# <AGENT_EXTRA_SETS> (" --set \"global.bluebox.podLogs.namespaces={shop,payments}\"").
+# <AGENT_EXTRA_SETS> (" --set \"global.bluebox.podLogs.namespaces={shop,payments}\""),
+# <CLUSTER_EXTRA_SETS> (the global.bluebox.liveRead.* sets when live read is on),
+# <LIVE_READ_KEY_STEP> (empty, or the lines that read the live-read key hidden
+# and pipe it into Secret bluebox-edgeconnect; each line starts with a newline).
 # <BASE> = https://raw.githubusercontent.com/pawelsiwek/bluebox-k8s-collector/<REF>/values
 
 (
@@ -20,8 +23,8 @@ printf 'Paste the Bluebox ingest token (input is hidden), then press Enter: '
 read -rs BLUEBOX_TOKEN
 echo
 [ -n "$BLUEBOX_TOKEN" ] || { echo 'No token entered; nothing installed.' >&2; exit 1; }
-printf '%s' "$BLUEBOX_TOKEN" | kubectl create secret generic bluebox-otelcol-token --namespace bluebox-otelcol --from-file=token=/dev/stdin --dry-run=client -o yaml | kubectl apply -f -
+printf '%s' "$BLUEBOX_TOKEN" | kubectl create secret generic bluebox-otelcol-token --namespace bluebox-otelcol --from-file=token=/dev/stdin --dry-run=client -o yaml | kubectl apply -f -<LIVE_READ_KEY_STEP>
 helm upgrade --install bluebox-otelcol-agent open-telemetry/opentelemetry-collector --version 0.177.0 --namespace bluebox-otelcol --wait --atomic --timeout 10m -f <BASE>/common.yaml -f <BASE>/agent.yaml -f <BASE>/overlays/<DISTRO>/agent.yaml<AGENT_EXTRA_FILES> --set "global.bluebox.clusterName=<CLUSTER_NAME>" --set "global.bluebox.endpoint=<ENDPOINT>"<AGENT_EXTRA_SETS>
-helm upgrade --install bluebox-otelcol-cluster open-telemetry/opentelemetry-collector --version 0.177.0 --namespace bluebox-otelcol --wait --atomic --timeout 10m -f <BASE>/common.yaml -f <BASE>/cluster.yaml -f <BASE>/overlays/<DISTRO>/cluster.yaml<CLUSTER_EXTRA_FILES> --set "global.bluebox.clusterName=<CLUSTER_NAME>" --set "global.bluebox.endpoint=<ENDPOINT>"
+helm upgrade --install bluebox-otelcol-cluster open-telemetry/opentelemetry-collector --version 0.177.0 --namespace bluebox-otelcol --wait --atomic --timeout 10m -f <BASE>/common.yaml -f <BASE>/cluster.yaml -f <BASE>/overlays/<DISTRO>/cluster.yaml<CLUSTER_EXTRA_FILES> --set "global.bluebox.clusterName=<CLUSTER_NAME>" --set "global.bluebox.endpoint=<ENDPOINT>"<CLUSTER_EXTRA_SETS>
 helm test bluebox-otelcol-agent --namespace bluebox-otelcol --logs
 )
