@@ -28,7 +28,7 @@ global:
       edgeConnectImage: docker.io/dynatrace/edgeconnect@sha256:06dbb89f5981c2b6b191e1164432d55f426cc6f929be9d85e234451b0f95b11a  # 1.811.4
       mcpServerImage: quay.io/containers/kubernetes_mcp_server@sha256:1da9d62ad0c008a6cadcf2718c86c2e2d18753ca1d9f1f3313068980794b24f2  # v0.0.69
       # Zero placeholder on main; the release workflow pins it on tag values-vX.Y.Z.
-      redactorImage: ghcr.io/pawelsiwek/k8s-mcp-redactor@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      redactorImage: ghcr.io/pawelsiwek/k8s-mcp-redactor@sha256:ee5dce23cfa6152d867a468ec25a74a13b0e58ae690c2ce23029bb2420f9095e
 
 extraManifests:
   # ---- kubernetes-mcp-server: read-only, Secrets and ConfigMaps denied ----

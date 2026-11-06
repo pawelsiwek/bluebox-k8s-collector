@@ -11,7 +11,7 @@
 global:
   bluebox:
     # Values-file release; also emitted as bluebox.collector.version (C1).
-    collectorVersion: "0.1.0"
+    collectorVersion: "0.1.3"
     # kube-system namespace UID. Empty = resolved with `lookup` at install time.
     # `helm template` (GitOps) has no cluster access, so it must be set there.
     clusterUid: ""
@@ -84,8 +84,8 @@ global:
 # Switch to the stock Dynatrace image with overlays/dynatrace-image/<role>.yaml.
 image:
   repository: ghcr.io/pawelsiwek/bluebox-otelcol
-  tag: "0.1.0"
-  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  tag: "0.1.3"
+  digest: sha256:254749451542d18bd1cc487a4cd17f13efc46cc804f7c702866de6fff810bb8c
   pullPolicy: IfNotPresent
 command:
   name: bluebox-otelcol
