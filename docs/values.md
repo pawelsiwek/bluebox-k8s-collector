@@ -249,8 +249,13 @@ and `ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt`.
 
 ## Live read (`live-read` overlay, cluster release, experiment)
 
-The flow is EdgeConnect → `k8s-mcp-<uid8>.bluebox.internal:8080` → redactor
+The flow is EdgeConnect → `k8s-mcp-<id8>.bluebox.internal:8080` → redactor
 → `kubernetes-mcp-server` → API server (C2).
+
+- **Host.** Bluebox sets `global.bluebox.liveRead.host` from the cluster
+  connection ID, because it creates the tenant EdgeConnect before the cluster
+  UID is known. When it is empty, the overlay derives the host from the
+  cluster UID.
 
 - **Hostname.** EdgeConnect has no host-mapping setting. The C2 hostname
   resolves through a pod `hostAliases` entry to the redactor sidecar on

@@ -2,7 +2,7 @@
 # release. Adds read-only live cluster access for the Bluebox agent (C2):
 #
 #   Function Executor --(EdgeConnect, outbound 443)--> EdgeConnect pod
-#     -> k8s-mcp-<uid8>.bluebox.internal:8080 (hostAliases -> 127.0.0.1)
+#     -> k8s-mcp-<id8>.bluebox.internal:8080 (hostAliases -> 127.0.0.1)
 #     -> redactor sidecar (redactor/) -> kubernetes-mcp-server Service :8080
 #     -> kube-apiserver (read-only ServiceAccount)
 #
@@ -12,7 +12,7 @@
 # redactor before it reaches EdgeConnect.
 #
 # Prerequisites (docs/values.md "Live read"): an EdgeConnect created in the tenant
-# with host pattern k8s-mcp-<uid8>.bluebox.internal, and its OAuth client in
+# with host pattern liveRead.host, and its OAuth client in
 # Secret `bluebox-edgeconnect` (keys client-id, client-secret).
 #
 # UNVERIFIED until the live-read spike runs: EdgeConnect runtime user and env-only
@@ -21,6 +21,7 @@ global:
   bluebox:
     liveRead:
       edgeConnectName: ""            # name of the EdgeConnect created in the tenant
+      host: ""                       # C2 host k8s-mcp-<8 hex>.bluebox.internal; Bluebox sets it, empty derives it from the cluster UID
       apiEndpointHost: ""            # <env>.apps.dynatrace.com
       oauthResource: ""              # urn:dtenvironment:<env>
       oauthEndpoint: https://sso.dynatrace.com/sso/oauth2/token
@@ -188,7 +189,7 @@ extraManifests:
           hostAliases:
             - ip: 127.0.0.1
               hostnames:
-                - 'k8s-mcp-{{ substr 0 8 (.Values.global.bluebox.clusterUid | default (dig "metadata" "uid" "" (lookup "v1" "Namespace" "" "kube-system")) | replace "-" "" | required "global.bluebox.clusterUid_is_required") }}.bluebox.internal'
+                - '{{ .Values.global.bluebox.liveRead.host | default (printf "k8s-mcp-%s.bluebox.internal" (substr 0 8 (.Values.global.bluebox.clusterUid | default (dig "metadata" "uid" "" (lookup "v1" "Namespace" "" "kube-system")) | replace "-" "" | required "global.bluebox.clusterUid_is_required"))) }}'
           securityContext:
             runAsNonRoot: true
             runAsUser: 65532

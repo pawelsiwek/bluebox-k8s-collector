@@ -78,6 +78,7 @@
           "additionalProperties": false,
           "properties": {
             "edgeConnectName": {"type": "string"},
+            "host": {"type": "string", "pattern": "^$|^k8s-mcp-[0-9a-f]{8}\\.bluebox\\.internal$"},
             "apiEndpointHost": {"type": "string", "pattern": "^$|^[a-z0-9.-]+$"},
             "oauthResource": {"type": "string", "pattern": "^$|^urn:dtenvironment:[a-z0-9]+$"},
             "oauthEndpoint": {"type": "string", "pattern": "^https://"},
